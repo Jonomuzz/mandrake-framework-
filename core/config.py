@@ -40,6 +40,11 @@ INTERVAL = os.getenv("INTERVAL", "1m")
 LIMIT = 300
 
 # =========================
+# LOOP SETTINGS
+# =========================
+SLEEP = 60
+
+# =========================
 # RISK SETTINGS
 # =========================
 RISK_PER_TRADE = 0.10
