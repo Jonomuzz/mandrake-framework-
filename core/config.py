@@ -17,7 +17,7 @@ PAIRS = [
     "LTCUSDT",
     "ATOMUSDT"
 ]
-INTERVAL = "1m"
+TIMEFRAME = os.getenv("TIMEFRAME", "1m")
 LIMIT = 100
 SLEEP = 30
 
