@@ -3,7 +3,20 @@ import os
 # ================= GENERAL =================
 ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
 
-PAIRS = ["BTCUSDT", "BNBUSDT"]
+PAIRS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "MATICUSDT",
+    "LTCUSDT",
+    "ATOMUSDT"
+]
 INTERVAL = "1m"
 LIMIT = 100
 SLEEP = 30
