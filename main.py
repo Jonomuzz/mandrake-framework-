@@ -16,6 +16,18 @@ if ACTIVE_STRATEGY == "trend":
     from strategies.trend import calculate_indicators
     from strategies.trend import check_signal
 
+elif ACTIVE_STRATEGY == "mean_reversion":
+    from strategies.mean_reversion import calculate_indicators
+    from strategies.mean_reversion import check_signal
+
+elif ACTIVE_STRATEGY == "breakout":
+    from strategies.breakout import calculate_indicators
+    from strategies.breakout import check_signal
+
+elif ACTIVE_STRATEGY == "momentum":
+    from strategies.momentum import calculate_indicators
+    from strategies.momentum import check_signal
+
 else:
     raise Exception(f"Unknown strategy: {ACTIVE_STRATEGY}")
 
