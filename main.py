@@ -27,7 +27,11 @@ elif ACTIVE_STRATEGY == "breakout":
 elif ACTIVE_STRATEGY == "momentum":
     from strategies.momentum import calculate_indicators
     from strategies.momentum import check_signal
-
+    
+elif ACTIVE_STRATEGY == "kst":
+    from strategies.kst import calculate_indicators
+    from strategies.kst import check_signal
+    
 else:
     raise Exception(f"Unknown strategy: {ACTIVE_STRATEGY}")
 
