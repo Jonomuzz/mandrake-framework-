@@ -48,4 +48,8 @@ SLEEP = 60
 # RISK SETTINGS
 # =========================
 RISK_PER_TRADE = 0.10
-STARTING_BALANCE = 500
+
+# =========================
+# PAPER TRADING
+# =========================
+START_BALANCE_PER_PAIR = 500
