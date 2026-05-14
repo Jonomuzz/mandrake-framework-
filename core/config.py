@@ -1,8 +1,19 @@
 import os
 
-# ================= GENERAL =================
+# =========================
+# ACTIVE STRATEGY
+# =========================
 ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
 
+# =========================
+# TELEGRAM
+# =========================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+ALERT_CHAT_ID = os.getenv("ALERT_CHAT_ID")
+
+# =========================
+# MARKET SETTINGS
+# =========================
 PAIRS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -17,14 +28,19 @@ PAIRS = [
     "LTCUSDT",
     "ATOMUSDT"
 ]
-TIMEFRAME = os.getenv("TIMEFRAME", "1m")
-LIMIT = 100
-SLEEP = 30
 
-# ================= RISK =================
-START_BALANCE_PER_PAIR = 500
+# =========================
+# TIMEFRAME
+# =========================
+INTERVAL = os.getenv("INTERVAL", "1m")
+
+# =========================
+# DATA SETTINGS
+# =========================
+LIMIT = 300
+
+# =========================
+# RISK SETTINGS
+# =========================
 RISK_PER_TRADE = 0.10
-
-# ================= TELEGRAM =================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("ALERT_CHAT_ID")
+STARTING_BALANCE = 500
