@@ -1,40 +1,75 @@
-from core.execution import stats
-from core.telegram import send_telegram
+import json
+import os
 
 
+METRICS_FILE = "storage/metrics.json"
 
-def send_metrics(pairs):
-    total_profit = 0
-    total_balance = 0
-    total_trades = 0
 
-    message = "📊 PERFORMANCE SUMMARY\n\n"
+DEFAULT_METRICS = {
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "gross_profit": 0,
+    "gross_loss": 0,
+    "largest_win": 0,
+    "largest_loss": 0,
+    "consecutive_losses": 0,
+    "max_consecutive_losses": 0,
+    "max_drawdown": 0,
+    "peak_balance": 0,
+    "current_drawdown": 0,
+    "trade_history": []
+}
 
-    for pair in pairs:
-        s = stats[pair]
 
-        win_rate = (
-            (s["wins"] / s["trades"] * 100)
-            if s["trades"] > 0 else 0
-        )
+# =========================
+# LOAD METRICS
+# =========================
+def load_metrics():
 
-        message += (
-            f"{pair}\n"
-            f"Trades: {s['trades']}\n"
-            f"Win Rate: {round(win_rate, 1)}%\n"
-            f"Profit: {round(s['profit_pct'], 2)}%\n"
-            f"Balance: ${round(s['balance'], 2)}\n\n"
-        )
+    if not os.path.exists(METRICS_FILE):
+        return DEFAULT_METRICS.copy()
 
-        total_profit += s["profit_usd"]
-        total_balance += s["balance"]
-        total_trades += s["trades"]
+    with open(METRICS_FILE, "r") as f:
+        return json.load(f)
 
-    message += (
-        f"TOTAL\n"
-        f"Trades: {total_trades}\n"
-        f"Profit: ${round(total_profit, 2)}\n"
-        f"Balance: ${round(total_balance, 2)}"
-    )
 
-    send_telegram(message)
+# =========================
+# SAVE METRICS
+# =========================
+def save_metrics(metrics):
+
+    with open(METRICS_FILE, "w") as f:
+        json.dump(metrics, f, indent=4)
+
+
+# =========================
+# UPDATE METRICS
+# =========================
+def update_metrics(metrics, pnl, balance):
+
+    metrics["total_trades"] += 1
+
+    metrics["trade_history"].append(pnl)
+
+    # =========================
+    # WIN / LOSS
+    # =========================
+    if pnl > 0:
+
+        metrics["wins"] += 1
+        metrics["gross_profit"] += pnl
+        metrics["consecutive_losses"] = 0
+
+        if pnl > metrics["largest_win"]:
+            metrics["largest_win"] = pnl
+
+    else:
+
+        metrics["losses"] += 1
+        metrics["gross_loss"] += abs(pnl)
+        metrics["consecutive_losses"] += 1
+
+        if abs(pnl) > metrics["largest_loss"]:
+            metrics["largest_loss"] = abs(pnl)
+    }
