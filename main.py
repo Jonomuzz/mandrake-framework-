@@ -1,23 +1,12 @@
-print("MAIN.PY STARTING")
-
 import time
-
-print("IMPORTING CONFIG")
 
 from core.config import ACTIVE_STRATEGY
 from core.config import PAIRS
 from core.config import SLEEP
 from core.config import START_BALANCE_PER_PAIR
 
-print("IMPORTING DATA")
-
 from core.data import get_klines
-
-print("IMPORTING TELEGRAM")
-
 from core.telegram import send_telegram
-
-print("IMPORTING METRICS")
 
 from core.metrics import (
     load_metrics,
@@ -25,53 +14,82 @@ from core.metrics import (
     calculate_advanced_metrics
 )
 
-print("LOADING STRATEGY")
-
+# =========================
+# STRATEGY LOADER
+# =========================
 if ACTIVE_STRATEGY == "trend":
-    from strategies.trend import calculate_indicators
-    from strategies.trend import check_signal
+
+    from strategies.trend import (
+        calculate_indicators,
+        check_signal
+    )
 
 elif ACTIVE_STRATEGY == "mean_reversion":
-    from strategies.mean_reversion import calculate_indicators
-    from strategies.mean_reversion import check_signal
+
+    from strategies.mean_reversion import (
+        calculate_indicators,
+        check_signal
+    )
 
 elif ACTIVE_STRATEGY == "breakout":
-    from strategies.breakout import calculate_indicators
-    from strategies.breakout import check_signal
+
+    from strategies.breakout import (
+        calculate_indicators,
+        check_signal
+    )
 
 elif ACTIVE_STRATEGY == "momentum":
-    from strategies.momentum import calculate_indicators
-    from strategies.momentum import check_signal
+
+    from strategies.momentum import (
+        calculate_indicators,
+        check_signal
+    )
 
 elif ACTIVE_STRATEGY == "kst":
-    from strategies.kst import calculate_indicators
-    from strategies.kst import check_signal
+
+    from strategies.kst import (
+        calculate_indicators,
+        check_signal
+    )
 
 else:
-    raise Exception(f"Unknown strategy: {ACTIVE_STRATEGY}")
+    raise Exception(
+        f"Unknown strategy: {ACTIVE_STRATEGY}"
+    )
 
-print("STRATEGY LOADED")
-
+# =========================
+# PAPER TRADING STATE
+# =========================
 balances = {}
 positions = {}
 
-print("INITIALIZING PAIRS")
-
+# =========================
+# INITIALIZE
+# =========================
 for pair in PAIRS:
 
     balances[pair] = START_BALANCE_PER_PAIR
+
     positions[pair] = None
 
-print("LOADING METRICS FILE")
-
+# =========================
+# METRICS
+# =========================
 metrics = load_metrics()
 
+# =========================
+# STARTUP
+# =========================
 print("FRAMEWORK BOT RUNNING")
 
 send_telegram(
-    f"Bot Started - Strategy: {ACTIVE_STRATEGY}"
+    f"🤖 Bot Started\n"
+    f"Strategy: {ACTIVE_STRATEGY}"
 )
 
+# =========================
+# MAIN LOOP
+# =========================
 while True:
 
     for pair in PAIRS:
@@ -88,43 +106,172 @@ while True:
 
             print(f"{pair} signal: {signal}")
 
+            current_price = df.iloc[-1]["close"]
+
             # =========================
-            # SIGNAL ALERTS
+            # OPEN TRADE
             # =========================
-            if signal is not None:
+            if (
+                positions[pair] is None
+                and signal is not None
+            ):
+
+                positions[pair] = {
+                    "side": signal,
+                    "entry": current_price
+                }
 
                 send_telegram(
-                    f"📈 SIGNAL DETECTED\n\n"
+                    f"🚀 TRADE OPENED\n\n"
                     f"Strategy: {ACTIVE_STRATEGY}\n"
                     f"Pair: {pair}\n"
-                    f"Signal: {signal}"
+                    f"Side: {signal}\n"
+                    f"Entry: {round(current_price, 4)}"
                 )
 
+            # =========================
+            # MANAGE OPEN TRADE
+            # =========================
+            elif positions[pair] is not None:
+
+                entry_price = (
+                    positions[pair]["entry"]
+                )
+
+                side = (
+                    positions[pair]["side"]
+                )
+
+                pnl_pct = 0
+
+                # =========================
+                # BUY TRADE
+                # =========================
+                if side == "BUY":
+
+                    pnl_pct = (
+                        current_price
+                        - entry_price
+                    ) / entry_price
+
+                # =========================
+                # SELL TRADE
+                # =========================
+                elif side == "SELL":
+
+                    pnl_pct = (
+                        entry_price
+                        - current_price
+                    ) / entry_price
+
+                # =========================
+                # EXIT CONDITIONS
+                # =========================
+                TAKE_PROFIT = 0.003
+                STOP_LOSS = -0.002
+
+                if (
+                    pnl_pct >= TAKE_PROFIT
+                    or pnl_pct <= STOP_LOSS
+                ):
+
+                    pnl_dollars = (
+                        balances[pair]
+                        * pnl_pct
+                    )
+
+                    balances[pair] += pnl_dollars
+
+                    update_metrics(
+                        metrics,
+                        pnl_dollars,
+                        balances[pair]
+                    )
+
+                    advanced = (
+                        calculate_advanced_metrics(
+                            metrics
+                        )
+                    )
+
+                    message = (
+                        f"✅ TRADE CLOSED\n\n"
+                    )
+
+                    message += (
+                        f"Strategy: "
+                        f"{ACTIVE_STRATEGY}\n"
+                    )
+
+                    message += (
+                        f"Pair: {pair}\n"
+                    )
+
+                    message += (
+                        f"Side: {side}\n"
+                    )
+
+                    message += (
+                        f"PnL: "
+                        f"${round(pnl_dollars, 2)}\n"
+                    )
+
+                    message += (
+                        f"Balance: "
+                        f"${round(balances[pair], 2)}\n"
+                    )
+
+                    message += "\n📊 ADVANCED METRICS\n"
+
+                    message += (
+                        f"Win Rate: "
+                        f"{advanced['win_rate']}%\n"
+                    )
+
+                    message += (
+                        f"Average Win: "
+                        f"${advanced['avg_win']}\n"
+                    )
+
+                    message += (
+                        f"Average Loss: "
+                        f"${advanced['avg_loss']}\n"
+                    )
+
+                    message += (
+                        f"Profit Factor: "
+                        f"{advanced['profit_factor']}\n"
+                    )
+
+                    message += (
+                        f"Max Drawdown: "
+                        f"${advanced['max_drawdown']}\n"
+                    )
+
+                    message += (
+                        f"Max Consecutive Losses: "
+                        f"{advanced['max_consecutive_losses']}\n"
+                    )
+
+                    message += (
+                        f"Largest Win: "
+                        f"${advanced['largest_win']}\n"
+                    )
+
+                    message += (
+                        f"Largest Loss: "
+                        f"${advanced['largest_loss']}\n"
+                    )
+
+                    send_telegram(message)
+
+                    positions[pair] = None
+
         except Exception as e:
 
-            print(f"ERROR WITH {pair}: {e}")
-
-    print("Cycle complete. Sleeping...")
-
-    time.sleep(SLEEP)
-
-    for pair in PAIRS:
-
-        try:
-
-            print(f"Checking {pair}...")
-
-            df = get_klines(pair)
-
-            df = calculate_indicators(df)
-
-            signal = check_signal(df)
-
-            print(f"{pair} signal: {signal}")
-
-        except Exception as e:
-
-            print(f"ERROR WITH {pair}: {e}")
+            print(
+                f"ERROR WITH {pair}: {e}"
+            )
 
     print("Cycle complete. Sleeping...")
 
