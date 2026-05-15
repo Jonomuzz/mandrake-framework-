@@ -10,7 +10,7 @@ from strategies import mean_reversion, trend, breakout, momentum
 # CONFIG
 # ----------------------------
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "BTCUSDT", "ETHUSDT", "BNBUSUSDT", "SOLUSDT",
     "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
     "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
 ]
@@ -20,12 +20,13 @@ CANDLE_LIMIT = 50
 BASE_URL = "https://api.binance.com/api/v3/klines"
 
 # ----------------------------
-# BOT CONFIG (IMPORTANT FIX)
+# ENV CONFIG
 # ----------------------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("ALERT_CHAT_ID")
+
 BOT_NAME = os.getenv("BOT_NAME", "mandrake-bot")
-STRATEGY = os.getenv("STRATEGY", "trend")
+ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
 
 # ----------------------------
 # STATE
@@ -72,24 +73,24 @@ def get_klines(symbol):
     return df
 
 # ----------------------------
-# STRATEGY ROUTER (KEY FIX)
+# STRATEGY ROUTER
 # ----------------------------
 def get_signal(df):
-    global STRATEGY
+    global ACTIVE_STRATEGY
 
-    if STRATEGY == "mean_reversion":
+    if ACTIVE_STRATEGY == "mean_reversion":
         df = mean_reversion.calculate_indicators(df)
         return mean_reversion.check_signal(df)
 
-    elif STRATEGY == "trend":
+    elif ACTIVE_STRATEGY == "trend":
         df = trend.calculate_indicators(df)
         return trend.check_signal(df)
 
-    elif STRATEGY == "breakout":
+    elif ACTIVE_STRATEGY == "breakout":
         df = breakout.calculate_indicators(df)
         return breakout.check_signal(df)
 
-    elif STRATEGY == "momentum":
+    elif ACTIVE_STRATEGY == "momentum":
         df = momentum.calculate_indicators(df)
         return momentum.check_signal(df)
 
@@ -99,9 +100,9 @@ def get_signal(df):
 # MAIN LOOP
 # ----------------------------
 def run_bot():
-    print(f"🤖 Bot started: {BOT_NAME} | Strategy: {STRATEGY}")
+    print(f"🤖 Bot started: {BOT_NAME} | Strategy: {ACTIVE_STRATEGY}")
 
-    send_telegram(f"🤖 {BOT_NAME} STARTED | Strategy: {STRATEGY}")
+    send_telegram(f"🤖 {BOT_NAME} STARTED | Strategy: {ACTIVE_STRATEGY}")
 
     while True:
         for symbol in SYMBOLS:
@@ -109,7 +110,7 @@ def run_bot():
                 df = get_klines(symbol)
                 signal = get_signal(df)
 
-                print(f"{symbol} | {STRATEGY} | signal:", signal)
+                print(f"{symbol} | {ACTIVE_STRATEGY} | signal:", signal)
 
                 if signal:
                     msg = f"📊 {BOT_NAME} | {symbol} SIGNAL: {signal}"
