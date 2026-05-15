@@ -34,42 +34,4 @@ def load_metrics():
         return json.load(f)
 
 
-# =========================
-# SAVE METRICS
-# =========================
-def save_metrics(metrics):
-
-    with open(METRICS_FILE, "w") as f:
-        json.dump(metrics, f, indent=4)
-
-
-# =========================
-# UPDATE METRICS
-# =========================
-def update_metrics(metrics, pnl, balance):
-
-    metrics["total_trades"] += 1
-
-    metrics["trade_history"].append(pnl)
-
-    # =========================
-    # WIN / LOSS
-    # =========================
-    if pnl > 0:
-
-        metrics["wins"] += 1
-        metrics["gross_profit"] += pnl
-        metrics["consecutive_losses"] = 0
-
-        if pnl > metrics["largest_win"]:
-            metrics["largest_win"] = pnl
-
-    else:
-
-        metrics["losses"] += 1
-        metrics["gross_loss"] += abs(pnl)
-        metrics["consecutive_losses"] += 1
-
-        if abs(pnl) > metrics["largest_loss"]:
-            metrics["largest_loss"] = abs(pnl)
     }
