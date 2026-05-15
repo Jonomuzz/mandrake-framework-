@@ -88,6 +88,40 @@ while True:
 
             print(f"{pair} signal: {signal}")
 
+            # =========================
+            # SIGNAL ALERTS
+            # =========================
+            if signal is not None:
+
+                send_telegram(
+                    f"📈 SIGNAL DETECTED\n\n"
+                    f"Strategy: {ACTIVE_STRATEGY}\n"
+                    f"Pair: {pair}\n"
+                    f"Signal: {signal}"
+                )
+
+        except Exception as e:
+
+            print(f"ERROR WITH {pair}: {e}")
+
+    print("Cycle complete. Sleeping...")
+
+    time.sleep(SLEEP)
+
+    for pair in PAIRS:
+
+        try:
+
+            print(f"Checking {pair}...")
+
+            df = get_klines(pair)
+
+            df = calculate_indicators(df)
+
+            signal = check_signal(df)
+
+            print(f"{pair} signal: {signal}")
+
         except Exception as e:
 
             print(f"ERROR WITH {pair}: {e}")
