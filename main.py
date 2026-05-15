@@ -2,6 +2,9 @@ import time
 import requests
 from collections import defaultdict
 
+# ----------------------------
+# CONFIG
+# ----------------------------
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
     "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
@@ -11,6 +14,7 @@ SYMBOLS = [
 INTERVAL = "1m"
 CANDLE_LIMIT = 50
 
+# IMPORTANT: replace these with REAL values in Railway env OR hardcode for testing
 TELEGRAM_TOKEN = "YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 
@@ -22,17 +26,32 @@ state = defaultdict(lambda: {
     "prev_ma20": None
 })
 
-
 # ----------------------------
-# TELEGRAM
+# TELEGRAM (FIXED - DEBUG SAFE)
 # ----------------------------
 def send_telegram(message):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("❌ Telegram not configured (missing token/chat_id)")
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
+
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
+
     try:
-        requests.post(url, data=payload, timeout=10)
+        r = requests.post(url, data=payload, timeout=10)
+
+        print("📨 Telegram status:", r.status_code)
+        print("📨 Telegram response:", r.text)
+
+        if r.status_code != 200:
+            print("❌ Telegram failed — check token/chat_id")
+
     except Exception as e:
-        print("Telegram error:", e)
+        print("❌ Telegram exception:", e)
 
 
 # ----------------------------
@@ -44,6 +63,7 @@ def get_klines(symbol):
         "interval": INTERVAL,
         "limit": CANDLE_LIMIT
     }
+
     r = requests.get(BASE_URL, params=params, timeout=10)
     data = r.json()
 
@@ -58,7 +78,7 @@ def sma(data, period):
 
 
 # ----------------------------
-# STRATEGY (FIXED CROSSOVER)
+# STRATEGY
 # ----------------------------
 def get_signal(symbol, closes):
     ma5 = sma(closes, 5)
@@ -67,35 +87,39 @@ def get_signal(symbol, closes):
     if ma5 is None or ma20 is None:
         return None
 
-    prev = state[symbol]
-
-    prev_ma5 = prev["prev_ma5"]
-    prev_ma20 = prev["prev_ma20"]
-
-    # update stored state AFTER checking
-    state[symbol]["prev_ma5"] = ma5
-    state[symbol]["prev_ma20"] = ma20
+    prev_ma5 = state[symbol]["prev_ma5"]
+    prev_ma20 = state[symbol]["prev_ma20"]
 
     # Need previous values to detect crossover
     if prev_ma5 is None or prev_ma20 is None:
+        state[symbol]["prev_ma5"] = ma5
+        state[symbol]["prev_ma20"] = ma20
         return None
 
-    # CROSS UP → BUY SIGNAL
+    signal = None
+
+    # CROSS UP → BUY
     if prev_ma5 <= prev_ma20 and ma5 > ma20:
-        return "BUY"
+        signal = "BUY"
 
-    # CROSS DOWN → SELL SIGNAL
-    if prev_ma5 >= prev_ma20 and ma5 < ma20:
-        return "SELL"
+    # CROSS DOWN → SELL
+    elif prev_ma5 >= prev_ma20 and ma5 < ma20:
+        signal = "SELL"
 
-    return None
+    # update state AFTER logic
+    state[symbol]["prev_ma5"] = ma5
+    state[symbol]["prev_ma20"] = ma20
+
+    return signal
 
 
 # ----------------------------
 # MAIN LOOP
 # ----------------------------
 def run_bot():
-    send_telegram("🤖 Bot started")
+    print("🤖 Bot started")
+
+    send_telegram("🤖 BOT STARTED")
 
     while True:
         for symbol in SYMBOLS:
@@ -109,6 +133,7 @@ def run_bot():
 
                 if signal:
                     msg = f"📊 {symbol} SIGNAL: {signal}"
+                    print("📨 SENDING:", msg)
                     send_telegram(msg)
 
             except Exception as e:
