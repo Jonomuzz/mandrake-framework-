@@ -18,7 +18,7 @@ CANDLE_LIMIT = 50
 import os
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("ALERT_CHAT_ID")
 
 BASE_URL = "https://api.binance.com/api/v3/klines"
 
