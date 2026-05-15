@@ -1,97 +1,122 @@
-print("MAIN.PY STARTING")
-
 import time
+import requests
+from collections import defaultdict
 
-print("IMPORTING CONFIG")
+SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
+    "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
+]
 
-from core.config import ACTIVE_STRATEGY
-from core.config import PAIRS
-from core.config import SLEEP
-from core.config import START_BALANCE_PER_PAIR
+INTERVAL = "1m"
+CANDLE_LIMIT = 50
 
-print("IMPORTING DATA")
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
 
-from core.data import get_klines
+BASE_URL = "https://api.binance.com/api/v3/klines"
 
-print("IMPORTING TELEGRAM")
+# Store previous MA state per symbol
+state = defaultdict(lambda: {
+    "prev_ma5": None,
+    "prev_ma20": None
+})
 
-from core.telegram import send_telegram
 
-print("IMPORTING METRICS")
+# ----------------------------
+# TELEGRAM
+# ----------------------------
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message}
+    try:
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print("Telegram error:", e)
 
-from core.metrics import (
-    load_metrics,
-    update_metrics,
-    calculate_advanced_metrics
-)
 
-print("LOADING STRATEGY")
+# ----------------------------
+# DATA
+# ----------------------------
+def get_klines(symbol):
+    params = {
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": CANDLE_LIMIT
+    }
+    r = requests.get(BASE_URL, params=params, timeout=10)
+    data = r.json()
 
-if ACTIVE_STRATEGY == "trend":
-    from strategies.trend import calculate_indicators
-    from strategies.trend import check_signal
+    closes = [float(candle[4]) for candle in data]
+    return closes
 
-elif ACTIVE_STRATEGY == "mean_reversion":
-    from strategies.mean_reversion import calculate_indicators
-    from strategies.mean_reversion import check_signal
 
-elif ACTIVE_STRATEGY == "breakout":
-    from strategies.breakout import calculate_indicators
-    from strategies.breakout import check_signal
+def sma(data, period):
+    if len(data) < period:
+        return None
+    return sum(data[-period:]) / period
 
-elif ACTIVE_STRATEGY == "momentum":
-    from strategies.momentum import calculate_indicators
-    from strategies.momentum import check_signal
 
-elif ACTIVE_STRATEGY == "kst":
-    from strategies.kst import calculate_indicators
-    from strategies.kst import check_signal
+# ----------------------------
+# STRATEGY (FIXED CROSSOVER)
+# ----------------------------
+def get_signal(symbol, closes):
+    ma5 = sma(closes, 5)
+    ma20 = sma(closes, 20)
 
-else:
-    raise Exception(f"Unknown strategy: {ACTIVE_STRATEGY}")
+    if ma5 is None or ma20 is None:
+        return None
 
-print("STRATEGY LOADED")
+    prev = state[symbol]
 
-balances = {}
-positions = {}
+    prev_ma5 = prev["prev_ma5"]
+    prev_ma20 = prev["prev_ma20"]
 
-print("INITIALIZING PAIRS")
+    # update stored state AFTER checking
+    state[symbol]["prev_ma5"] = ma5
+    state[symbol]["prev_ma20"] = ma20
 
-for pair in PAIRS:
+    # Need previous values to detect crossover
+    if prev_ma5 is None or prev_ma20 is None:
+        return None
 
-    balances[pair] = START_BALANCE_PER_PAIR
-    positions[pair] = None
+    # CROSS UP → BUY SIGNAL
+    if prev_ma5 <= prev_ma20 and ma5 > ma20:
+        return "BUY"
 
-print("LOADING METRICS FILE")
+    # CROSS DOWN → SELL SIGNAL
+    if prev_ma5 >= prev_ma20 and ma5 < ma20:
+        return "SELL"
 
-metrics = load_metrics()
+    return None
 
-print("FRAMEWORK BOT RUNNING")
 
-send_telegram(
-    f"Bot Started - Strategy: {ACTIVE_STRATEGY}"
-)
+# ----------------------------
+# MAIN LOOP
+# ----------------------------
+def run_bot():
+    send_telegram("🤖 Bot started")
 
-while True:
+    while True:
+        for symbol in SYMBOLS:
+            try:
+                print(f"Checking {symbol}...")
 
-    for pair in PAIRS:
+                closes = get_klines(symbol)
+                signal = get_signal(symbol, closes)
 
-        try:
+                print(f"{symbol} signal:", signal)
 
-            print(f"Checking {pair}...")
+                if signal:
+                    msg = f"📊 {symbol} SIGNAL: {signal}"
+                    send_telegram(msg)
 
-            df = get_klines(pair)
+            except Exception as e:
+                print(f"Error on {symbol}:", e)
 
-            df = calculate_indicators(df)
+        print("Cycle complete. Sleeping...\n")
+        time.sleep(60)
 
-            signal = check_signal(df)
 
-            print(f"{pair} signal: {signal}")
-
-        except Exception as e:
-
-            print(f"ERROR WITH {pair}: {e}")
-
-    print("Cycle complete. Sleeping...")
-
-    time.sleep(SLEEP)
+if __name__ == "__main__":
+    run_bot()
