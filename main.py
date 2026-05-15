@@ -1,6 +1,10 @@
 import time
 import requests
+import os
 from collections import defaultdict
+import pandas as pd
+
+from strategies import mean_reversion, trend, breakout, momentum
 
 # ----------------------------
 # CONFIG
@@ -13,48 +17,38 @@ SYMBOLS = [
 
 INTERVAL = "1m"
 CANDLE_LIMIT = 50
-
-# IMPORTANT: replace these with REAL values in Railway env OR hardcode for testing
-import os
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("ALERT_CHAT_ID")
-
 BASE_URL = "https://api.binance.com/api/v3/klines"
 
-# Store previous MA state per symbol
-state = defaultdict(lambda: {
-    "prev_ma5": None,
-    "prev_ma20": None
-})
+# ----------------------------
+# BOT CONFIG (IMPORTANT FIX)
+# ----------------------------
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("ALERT_CHAT_ID")
+BOT_NAME = os.getenv("BOT_NAME", "mandrake-bot")
+STRATEGY = os.getenv("STRATEGY", "trend")
 
 # ----------------------------
-# TELEGRAM (FIXED - DEBUG SAFE)
+# STATE
+# ----------------------------
+state = defaultdict(dict)
+
+# ----------------------------
+# TELEGRAM
 # ----------------------------
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("❌ Telegram not configured (missing token/chat_id)")
+        print("❌ Telegram not configured")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message
-    }
-
     try:
-        r = requests.post(url, data=payload, timeout=10)
-
-        print("📨 Telegram status:", r.status_code)
-        print("📨 Telegram response:", r.text)
-
-        if r.status_code != 200:
-            print("❌ Telegram failed — check token/chat_id")
-
+        requests.post(url, data={
+            "chat_id": CHAT_ID,
+            "text": message
+        }, timeout=10)
     except Exception as e:
-        print("❌ Telegram exception:", e)
-
+        print("Telegram error:", e)
 
 # ----------------------------
 # DATA
@@ -69,77 +63,60 @@ def get_klines(symbol):
     r = requests.get(BASE_URL, params=params, timeout=10)
     data = r.json()
 
-    closes = [float(candle[4]) for candle in data]
-    return closes
+    df = pd.DataFrame(data, columns=[
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"
+    ])
 
-
-def sma(data, period):
-    if len(data) < period:
-        return None
-    return sum(data[-period:]) / period
-
+    df["close"] = df["close"].astype(float)
+    return df
 
 # ----------------------------
-# STRATEGY
+# STRATEGY ROUTER (KEY FIX)
 # ----------------------------
-def get_signal(symbol, closes):
-    ma5 = sma(closes, 5)
-    ma20 = sma(closes, 20)
+def get_signal(df):
+    global STRATEGY
 
-    if ma5 is None or ma20 is None:
-        return None
+    if STRATEGY == "mean_reversion":
+        df = mean_reversion.calculate_indicators(df)
+        return mean_reversion.check_signal(df)
 
-    prev_ma5 = state[symbol]["prev_ma5"]
-    prev_ma20 = state[symbol]["prev_ma20"]
+    elif STRATEGY == "trend":
+        df = trend.calculate_indicators(df)
+        return trend.check_signal(df)
 
-    # Need previous values to detect crossover
-    if prev_ma5 is None or prev_ma20 is None:
-        state[symbol]["prev_ma5"] = ma5
-        state[symbol]["prev_ma20"] = ma20
-        return None
+    elif STRATEGY == "breakout":
+        df = breakout.calculate_indicators(df)
+        return breakout.check_signal(df)
 
-    signal = None
+    elif STRATEGY == "momentum":
+        df = momentum.calculate_indicators(df)
+        return momentum.check_signal(df)
 
-    # CROSS UP → BUY
-    if prev_ma5 <= prev_ma20 and ma5 > ma20:
-        signal = "BUY"
-
-    # CROSS DOWN → SELL
-    elif prev_ma5 >= prev_ma20 and ma5 < ma20:
-        signal = "SELL"
-
-    # update state AFTER logic
-    state[symbol]["prev_ma5"] = ma5
-    state[symbol]["prev_ma20"] = ma20
-
-    return signal
-
+    return None
 
 # ----------------------------
 # MAIN LOOP
 # ----------------------------
 def run_bot():
-    print("🤖 Bot started")
+    print(f"🤖 Bot started: {BOT_NAME} | Strategy: {STRATEGY}")
 
-    send_telegram("🤖 BOT STARTED")
+    send_telegram(f"🤖 {BOT_NAME} STARTED | Strategy: {STRATEGY}")
 
     while True:
         for symbol in SYMBOLS:
             try:
-                print(f"Checking {symbol}...")
+                df = get_klines(symbol)
+                signal = get_signal(df)
 
-                closes = get_klines(symbol)
-                signal = get_signal(symbol, closes)
-
-                print(f"{symbol} signal:", signal)
+                print(f"{symbol} | {STRATEGY} | signal:", signal)
 
                 if signal:
-                    msg = f"📊 {symbol} SIGNAL: {signal}"
-                    print("📨 SENDING:", msg)
+                    msg = f"📊 {BOT_NAME} | {symbol} SIGNAL: {signal}"
                     send_telegram(msg)
 
             except Exception as e:
-                print(f"Error on {symbol}:", e)
+                print(f"Error {symbol}:", e)
 
         print("Cycle complete. Sleeping...\n")
         time.sleep(60)
