@@ -15,8 +15,10 @@ INTERVAL = "1m"
 CANDLE_LIMIT = 50
 
 # IMPORTANT: replace these with REAL values in Railway env OR hardcode for testing
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
+import os
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 BASE_URL = "https://api.binance.com/api/v3/klines"
 
