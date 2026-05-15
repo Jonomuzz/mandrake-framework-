@@ -1,128 +1,97 @@
+print("MAIN.PY STARTING")
+
 import time
-import requests
-import os
-from collections import defaultdict
-import pandas as pd
 
-from strategies import mean_reversion, trend, breakout, momentum
+print("IMPORTING CONFIG")
 
-# ----------------------------
-# CONFIG
-# ----------------------------
-SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
-    "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
-]
+from core.config import ACTIVE_STRATEGY
+from core.config import PAIRS
+from core.config import SLEEP
+from core.config import START_BALANCE_PER_PAIR
 
-INTERVAL = "1m"
-CANDLE_LIMIT = 50
-BASE_URL = "https://api.binance.com/api/v3/klines"
+print("IMPORTING DATA")
 
-# ----------------------------
-# ENV VARIABLES
-# ----------------------------
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("ALERT_CHAT_ID")
+from core.data import get_klines
 
-BOT_NAME = os.getenv("BOT_NAME", "mandrake-bot")
-ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
+print("IMPORTING TELEGRAM")
 
-# ----------------------------
-# STATE
-# ----------------------------
-state = defaultdict(dict)
+from core.telegram import send_telegram
 
-# ----------------------------
-# TELEGRAM
-# ----------------------------
-def send_telegram(message):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("❌ Telegram not configured")
-        return
+print("IMPORTING METRICS")
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+from core.metrics import (
+    load_metrics,
+    update_metrics,
+    calculate_advanced_metrics
+)
 
-    try:
-        requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": message
-        }, timeout=10)
-    except Exception as e:
-        print("Telegram error:", e)
+print("LOADING STRATEGY")
 
-# ----------------------------
-# DATA
-# ----------------------------
-def get_klines(symbol):
-    params = {
-        "symbol": symbol,
-        "interval": INTERVAL,
-        "limit": CANDLE_LIMIT
-    }
+if ACTIVE_STRATEGY == "trend":
+    from strategies.trend import calculate_indicators
+    from strategies.trend import check_signal
 
-    r = requests.get(BASE_URL, params=params, timeout=10)
-    data = r.json()
+elif ACTIVE_STRATEGY == "mean_reversion":
+    from strategies.mean_reversion import calculate_indicators
+    from strategies.mean_reversion import check_signal
 
-    df = pd.DataFrame(data, columns=[
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"
-    ])
+elif ACTIVE_STRATEGY == "breakout":
+    from strategies.breakout import calculate_indicators
+    from strategies.breakout import check_signal
 
-    df["close"] = df["close"].astype(float)
-    return df
+elif ACTIVE_STRATEGY == "momentum":
+    from strategies.momentum import calculate_indicators
+    from strategies.momentum import check_signal
 
-# ----------------------------
-# STRATEGY ROUTER
-# ----------------------------
-def get_signal(df):
-    global ACTIVE_STRATEGY
+elif ACTIVE_STRATEGY == "kst":
+    from strategies.kst import calculate_indicators
+    from strategies.kst import check_signal
 
-    if ACTIVE_STRATEGY == "mean_reversion":
-        df = mean_reversion.calculate_indicators(df)
-        return mean_reversion.check_signal(df)
+else:
+    raise Exception(f"Unknown strategy: {ACTIVE_STRATEGY}")
 
-    elif ACTIVE_STRATEGY == "trend":
-        df = trend.calculate_indicators(df)
-        return trend.check_signal(df)
+print("STRATEGY LOADED")
 
-    elif ACTIVE_STRATEGY == "breakout":
-        df = breakout.calculate_indicators(df)
-        return breakout.check_signal(df)
+balances = {}
+positions = {}
 
-    elif ACTIVE_STRATEGY == "momentum":
-        df = momentum.calculate_indicators(df)
-        return momentum.check_signal(df)
+print("INITIALIZING PAIRS")
 
-    return None
+for pair in PAIRS:
 
-# ----------------------------
-# MAIN LOOP
-# ----------------------------
-def run_bot():
-    print(f"🤖 Bot started: {BOT_NAME} | Strategy: {ACTIVE_STRATEGY}")
+    balances[pair] = START_BALANCE_PER_PAIR
+    positions[pair] = None
 
-    send_telegram(f"🤖 {BOT_NAME} STARTED | Strategy: {ACTIVE_STRATEGY}")
+print("LOADING METRICS FILE")
 
-    while True:
-        for symbol in SYMBOLS:
-            try:
-                df = get_klines(symbol)
-                signal = get_signal(df)
+metrics = load_metrics()
 
-                print(f"{symbol} | {ACTIVE_STRATEGY} | signal:", signal)
+print("FRAMEWORK BOT RUNNING")
 
-                if signal:
-                    # ✅ DEBUG LINE ADDED HERE (CRITICAL TEST)
-                    msg = f"📊 {BOT_NAME} | STRATEGY={ACTIVE_STRATEGY} | {symbol} SIGNAL: {signal}"
-                    send_telegram(msg)
+send_telegram(
+    f"Bot Started - Strategy: {ACTIVE_STRATEGY}"
+)
 
-            except Exception as e:
-                print(f"Error {symbol}:", e)
+while True:
 
-        print("Cycle complete. Sleeping...\n")
-        time.sleep(60)
+    for pair in PAIRS:
 
+        try:
 
-if __name__ == "__main__":
-    run_bot()
+            print(f"Checking {pair}...")
+
+            df = get_klines(pair)
+
+            df = calculate_indicators(df)
+
+            signal = check_signal(df)
+
+            print(f"{pair} signal: {signal}")
+
+        except Exception as e:
+
+            print(f"ERROR WITH {pair}: {e}")
+
+    print("Cycle complete. Sleeping...")
+
+    time.sleep(SLEEP)
