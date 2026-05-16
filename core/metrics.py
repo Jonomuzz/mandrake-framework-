@@ -1,6 +1,10 @@
 strategy_stats = {}
+capital_rotation_state = {}
+correlation_state = {}
 
-
+# =========================
+# STRATEGY TRACKING
+# =========================
 def update_strategy_metrics(strategy, pnl):
     if strategy not in strategy_stats:
         strategy_stats[strategy] = {
@@ -22,40 +26,98 @@ def update_strategy_metrics(strategy, pnl):
         s["losses"] += 1
 
 
-def evaluate_strategies():
-    """
-    AUTO DISABLER (CRITICAL EDGE FEATURE)
-    """
+# =========================
+# CAPITAL ROTATION ENGINE
+# =========================
+def update_capital_rotation():
 
-    for name, s in strategy_stats.items():
+    if not strategy_stats:
+        return
 
-        if s["trades"] < 10:
+    scores = {}
+
+    for k, v in strategy_stats.items():
+        if v["trades"] == 0:
             continue
 
-        win_rate = s["wins"] / s["trades"]
-
-        if win_rate < 0.40 and s["pnl"] < 0:
-            s["disabled"] = True
-
-        if win_rate > 0.55 and s["pnl"] > 0:
-            s["disabled"] = False
+        win_rate = v["wins"] / v["trades"]
+        scores[k] = v["pnl"] * win_rate
 
 
-def get_leaderboard():
-    msg = "📊 STRATEGY LEADERBOARD\n\n"
+    if not scores:
+        return
 
-    ranked = sorted(strategy_stats.items(), key=lambda x: x[1]["pnl"], reverse=True)
+    best = max(scores.values())
+    worst = min(scores.values())
 
-    for name, s in ranked:
-        wr = (s["wins"] / s["trades"] * 100) if s["trades"] else 0
+    for k, score in scores.items():
 
-        status = "DISABLED" if s["disabled"] else "ACTIVE"
+        if k not in capital_rotation_state:
+            capital_rotation_state[k] = {
+                "allocation": 1.0,
+                "disabled": False
+            }
 
-        msg += (
-            f"{name} [{status}]\n"
-            f"Trades: {s['trades']}\n"
-            f"Win Rate: {wr:.1f}%\n"
-            f"PnL: {s['pnl']:.2f}\n\n"
-        )
+        if best == worst:
+            norm = 1.0
+        else:
+            norm = (score - worst) / (best - worst)
 
-    return msg
+        allocation = 0.3 + (norm * 1.7)
+
+        capital_rotation_state[k]["allocation"] = allocation
+
+        # auto disable
+        if score < -0.5:
+            capital_rotation_state[k]["disabled"] = True
+        elif score > 0:
+            capital_rotation_state[k]["disabled"] = False
+
+
+def get_allocation(strategy):
+    if strategy not in capital_rotation_state:
+        return 1.0
+    return capital_rotation_state[strategy]["allocation"]
+
+
+def is_disabled(strategy):
+    return capital_rotation_state.get(strategy, {}).get("disabled", False)
+
+
+# =========================
+# CORRELATION RISK ENGINE
+# =========================
+CORRELATION_GROUPS = {
+    "BTC_GROUP": ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"],
+    "ALT_GROUP": ["XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "MATICUSDT"],
+    "SMALL_GROUP": ["LTCUSDT", "ATOMUSDT"]
+}
+
+correlation_exposure = {}
+
+
+def update_correlation(symbol, signal_strength=1):
+
+    for group, symbols in CORRELATION_GROUPS.items():
+
+        if symbol in symbols:
+
+            if group not in correlation_exposure:
+                correlation_exposure[group] = 0
+
+            correlation_exposure[group] += signal_strength
+
+
+def correlation_block(symbol):
+
+    for group, symbols in CORRELATION_GROUPS.items():
+
+        if symbol in symbols:
+
+            exposure = correlation_exposure.get(group, 0)
+
+            # limit overexposure
+            if exposure > 3:
+                return True
+
+    return False
