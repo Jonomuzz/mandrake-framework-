@@ -1,3 +1,4 @@
+positions = {}
 from collections import defaultdict
 
 from core.config import START_BALANCE_PER_PAIR
