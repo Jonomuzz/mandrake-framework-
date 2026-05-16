@@ -1,7 +1,6 @@
 import time
 import requests
 import os
-from collections import defaultdict
 import pandas as pd
 
 from strategies import mean_reversion, trend, breakout, momentum
@@ -30,7 +29,12 @@ BOT_NAME = os.getenv("BOT_NAME", "mandrake-bot")
 ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
 
 # ----------------------------
-# ANALYTICS STATE
+# DEBUG MODE (TURN ON/OFF)
+# ----------------------------
+FAST_DIAGNOSIS = True   # <-- SET False later when stable
+
+# ----------------------------
+# ANALYTICS
 # ----------------------------
 analytics = load()
 
@@ -98,17 +102,15 @@ def get_signal(df):
     return None
 
 # ----------------------------
-# TRADE SIMULATION (ENTRY/EXIT ENGINE)
+# POSITION TRACKING
 # ----------------------------
-positions = {}  # key: (bot, symbol)
-
+positions = {}
 
 def open_position(bot, symbol, side, price):
     positions[(bot, symbol)] = {
         "side": side,
         "entry": price
     }
-
 
 def close_position(bot, symbol, price):
     key = (bot, symbol)
@@ -149,6 +151,17 @@ def run_bot():
                 signal = get_signal(df)
 
                 # ----------------------------
+                # FAST DIAGNOSIS OUTPUT
+                # ----------------------------
+                if FAST_DIAGNOSIS:
+                    print(
+                        f"[DEBUG] {symbol} | "
+                        f"Price={price} | "
+                        f"Signal={signal} | "
+                        f"Strategy={ACTIVE_STRATEGY}"
+                    )
+
+                # ----------------------------
                 # ENTRY
                 # ----------------------------
                 if signal == "BUY":
@@ -156,8 +169,7 @@ def run_bot():
                         open_position(BOT_NAME, symbol, "BUY", price)
 
                         send_telegram(
-                            f"🟢 {BOT_NAME} | {ACTIVE_STRATEGY}\n"
-                            f"OPEN BUY {symbol} @ {price}"
+                            f"🟢 {BOT_NAME} OPEN BUY\n{symbol} @ {price}"
                         )
 
                 # ----------------------------
@@ -173,8 +185,8 @@ def run_bot():
                         metrics = compute_metrics(analytics[BOT_NAME][symbol])
 
                         send_telegram(
-                            f"🔴 {BOT_NAME} | {ACTIVE_STRATEGY}\n"
-                            f"CLOSE TRADE {symbol}\n"
+                            f"🔴 {BOT_NAME} CLOSE TRADE\n"
+                            f"{symbol}\n"
                             f"PnL: {trade['pnl']:.2f}%\n"
                             f"Entry: {trade['entry']}\n"
                             f"Exit: {trade['exit']}\n\n"
