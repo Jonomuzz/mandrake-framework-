@@ -1,3 +1,4 @@
+strategy_stats = {}
 import json
 import os
 
