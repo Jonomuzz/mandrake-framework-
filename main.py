@@ -1,40 +1,33 @@
 import time
 import requests
 import pandas as pd
+import os
 
 from core.config import PAIRS, SLEEP
-from core.execution import handle_trade, initialize_pairs
-
-from core.metrics import (
-    update_capital_rotation,
-    is_disabled,
-    update_correlation,
-    correlation_block,
-    reset_correlation
-)
-
-from core.regime import detect_regime, get_regime_bias
 from core.strategy_registry import get_strategy
-
+from core.execution import handle_trade, initialize_pairs
 from core.telegram import send_telegram
 
+
+# =========================
+# BINANCE CONFIG
+# =========================
 BASE_URL = "https://api.binance.com/api/v3/klines"
 INTERVAL = "1m"
 LIMIT = 100
 
 
 # =========================
-# DATA
+# DATA FETCH
 # =========================
 def get_klines(symbol):
-
     params = {
         "symbol": symbol,
         "interval": INTERVAL,
         "limit": LIMIT
     }
 
-    r = requests.get(BASE_URL, params=params)
+    r = requests.get(BASE_URL, params=params, timeout=10)
     data = r.json()
 
     df = pd.DataFrame(data)
@@ -44,10 +37,9 @@ def get_klines(symbol):
 
 
 # =========================
-# STRATEGY SELECTOR
+# STRATEGY SELECTOR (NO REGIME ENGINE)
 # =========================
 def select_strategy(df):
-
     ma20 = df["close"].rolling(20).mean()
     slope = ma20.diff().iloc[-1]
     vol = df["close"].rolling(20).std().iloc[-1]
@@ -55,20 +47,24 @@ def select_strategy(df):
 
     vol_ratio = vol / price
 
+    # TREND
     if abs(slope) > vol * 0.15:
         return "trend_strength_crossover"
 
+    # BREAKOUT
     if vol_ratio > 0.01:
         return "breakout"
 
+    # MOMENTUM
     if slope > 0 and vol_ratio < 0.006:
         return "momentum"
 
+    # DEFAULT
     return "mean_reversion"
 
 
 # =========================
-# SIGNAL ENGINE (NEW)
+# SIGNAL ENGINE (REGISTRY)
 # =========================
 def get_signal(df, strategy_name):
 
@@ -78,7 +74,6 @@ def get_signal(df, strategy_name):
         return None
 
     df = strategy.calculate_indicators(df)
-
     return strategy.check_signal(df)
 
 
@@ -86,7 +81,6 @@ def get_signal(df, strategy_name):
 # MAIN LOOP
 # =========================
 def run():
-
     print("🚀 STRATEGY REGISTRY ENGINE STARTED")
     send_telegram("🚀 STRATEGY REGISTRY ENGINE STARTED")
 
@@ -94,51 +88,28 @@ def run():
 
     while True:
 
-        reset_correlation()
-
         for symbol in PAIRS:
 
             try:
                 df = get_klines(symbol)
 
-                # =========================
-                # REGIME ENGINE
-                # =========================
-                regime = detect_regime(df)
-                bias = get_regime_bias()
-
                 strategy = select_strategy(df)
-
-                # =========================
-                # SAFETY FILTERS
-                # =========================
-                if is_disabled(strategy):
-                    continue
-
-                if correlation_block(symbol):
-                    continue
-
-                # regime weighting
-                if strategy in bias and bias[strategy] < 0.7:
-                    continue
-
                 signal = get_signal(df, strategy)
+
                 price = df["close"].iloc[-1]
 
-                print(f"[{symbol}] Regime={regime} Strategy={strategy} Signal={signal}")
+                print(f"[{symbol}] Strategy={strategy} Signal={signal} Price={price}")
 
-                # =========================
-                # EXECUTION
-                # =========================
                 if signal:
-                    update_correlation(symbol)
+                    msg = f"{symbol} | {strategy.upper()} | {signal} @ {price}"
+                    send_telegram(msg)
+
                     handle_trade(symbol, signal, price, strategy)
 
             except Exception as e:
                 print(f"Error {symbol}: {e}")
 
-        update_capital_rotation()
-
+        print("Cycle complete...\n")
         time.sleep(SLEEP)
 
 
