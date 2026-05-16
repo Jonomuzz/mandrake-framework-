@@ -20,20 +20,30 @@ LIMIT = 100
 # DATA FETCH
 # =========================
 def get_klines(symbol):
-    params = {
-        "symbol": symbol,
-        "interval": INTERVAL,
-        "limit": LIMIT
-    }
-
-    r = requests.get(BASE_URL, params=params, timeout=10)
+    params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
+    r = requests.get(BASE_URL, params=params)
     data = r.json()
 
-    df = pd.DataFrame(data)
-    df["close"] = df[4].astype(float)
+    df = pd.DataFrame(data, columns=[
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_asset_volume",
+        "num_trades",
+        "taker_buy_base",
+        "taker_buy_quote",
+        "ignore"
+    ])
+
+    # convert numeric columns properly
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
 
     return df
-
 
 # =========================
 # STRATEGY SELECTOR (NO REGIME ENGINE)
