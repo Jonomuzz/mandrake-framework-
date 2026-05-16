@@ -1,0 +1,42 @@
+import numpy as np
+
+
+def detect_regime(df):
+    """
+    Simple volatility + trend regime classifier
+    """
+
+    closes = df["close"]
+
+    ma20 = closes.rolling(20).mean()
+    slope = ma20.diff().iloc[-1]
+    vol = closes.rolling(20).std().iloc[-1]
+
+    price = closes.iloc[-1]
+
+    vol_ratio = vol / price
+
+    if vol_ratio > 0.01:
+        return "HIGH_VOLATILITY"
+
+    if slope > 0:
+        return "UPTREND"
+
+    if slope < 0:
+        return "DOWNTREND"
+
+    return "SIDEWAYS"
+
+
+def get_regime_bias():
+    """
+    Strategy weighting by regime (simple baseline)
+    """
+
+    return {
+        "trend_strength_crossover": 1.0,
+        "mean_reversion": 0.9,
+        "breakout": 0.8,
+        "momentum": 0.85,
+        "kst": 0.7
+    }
