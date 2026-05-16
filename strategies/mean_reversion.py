@@ -8,7 +8,6 @@ def calculate_indicators(df):
     return df
 
 
-
 def check_signal(df):
     if len(df) < 25:
         return None
@@ -19,10 +18,8 @@ def check_signal(df):
     if curr["close"] < curr["lower_band"]:
         return "BUY"
 
-    # SELL REVERSION
-    if (
-    curr["close"] > curr["upper_band"]
-):
-    return "SELL"
+    # SELL OVERBOUGHT (FIXED INDENTATION)
+    if curr["close"] > curr["upper_band"]:
+        return "SELL"
 
     return None
