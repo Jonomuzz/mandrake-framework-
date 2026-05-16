@@ -4,7 +4,6 @@ import pandas as pd
 import os
 
 from core.config import PAIRS, SLEEP
-from core.strategy_registry import get_strategy
 from core.execution import handle_trade, initialize_pairs
 from core.telegram import send_telegram
 
@@ -68,14 +67,32 @@ def select_strategy(df):
 # =========================
 def get_signal(df, strategy_name):
 
-    strategy = get_strategy(strategy_name)
+    if strategy_name == "mean_reversion":
+        from strategies import mean_reversion
+        df = mean_reversion.calculate_indicators(df)
+        return mean_reversion.check_signal(df)
 
-    if strategy is None:
-        return None
+    if strategy_name == "breakout":
+        from strategies import breakout
+        df = breakout.calculate_indicators(df)
+        return breakout.check_signal(df)
 
-    df = strategy.calculate_indicators(df)
-    return strategy.check_signal(df)
+    if strategy_name == "momentum":
+        from strategies import momentum
+        df = momentum.calculate_indicators(df)
+        return momentum.check_signal(df)
 
+    if strategy_name == "kst":
+        from strategies import kst
+        df = kst.calculate_indicators(df)
+        return kst.check_signal(df)
+
+    if strategy_name == "trend_strength_crossover":
+        from strategies import trend_strength_crossover
+        df = trend_strength_crossover.calculate_indicators(df)
+        return trend_strength_crossover.check_signal(df)
+
+    return None
 
 # =========================
 # MAIN LOOP
