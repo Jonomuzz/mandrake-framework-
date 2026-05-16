@@ -11,9 +11,15 @@ from strategies import (
     kst
 )
 
-from core.config import PAIRS, SLEEP, ACTIVE_STRATEGY
+from core.config import PAIRS, SLEEP
 from core.execution import handle_trade, initialize_pairs
-from core.metrics import evaluate_strategies, get_leaderboard, strategy_stats
+from core.metrics import (
+    update_capital_rotation,
+    is_disabled,
+    update_correlation,
+    correlation_block,
+    reset_correlation
+)
 from core.telegram import send_telegram
 
 BASE_URL = "https://api.binance.com/api/v3/klines"
@@ -32,6 +38,7 @@ def get_klines(symbol):
 
 
 def select_strategy(df):
+
     ma20 = df["close"].rolling(20).mean()
     slope = ma20.diff().iloc[-1]
     vol = df["close"].rolling(20).std().iloc[-1]
@@ -73,12 +80,15 @@ def get_signal(df, strategy):
 
 
 def run():
-    print("🚀 SWITCHER ENGINE STARTED")
-    send_telegram("🚀 SWITCHER ENGINE STARTED")
+
+    print("🚀 ENGINE STARTED")
+    send_telegram("🚀 ENGINE STARTED")
 
     initialize_pairs(PAIRS)
 
     while True:
+
+        reset_correlation()
 
         for symbol in PAIRS:
 
@@ -87,23 +97,26 @@ def run():
 
                 strategy = select_strategy(df)
 
-                if strategy_stats.get(strategy, {}).get("disabled"):
+                if is_disabled(strategy):
+                    continue
+
+                if correlation_block(symbol):
                     continue
 
                 signal = get_signal(df, strategy)
                 price = df["close"].iloc[-1]
 
-                print(f"[{symbol}] {strategy} => {signal}")
+                print(symbol, strategy, signal)
 
                 if signal:
+                    update_correlation(symbol)
                     handle_trade(symbol, signal, price, strategy)
 
             except Exception as e:
-                print(f"Error {symbol}: {e}")
+                print("Error:", symbol, e)
 
-        evaluate_strategies()
+        update_capital_rotation()
 
-        print("Cycle complete...\n")
         time.sleep(SLEEP)
 
 
