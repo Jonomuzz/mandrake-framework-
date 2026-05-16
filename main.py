@@ -4,7 +4,7 @@ import pandas as pd
 
 from strategies import (
     mean_reversion,
-    trend_ma_crossover,
+    trend_strength_crossover,
     breakout,
     momentum,
     kst
