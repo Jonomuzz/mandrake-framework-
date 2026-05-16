@@ -1,11 +1,12 @@
 strategy_stats = {}
 capital_rotation_state = {}
-correlation_state = {}
+correlation_exposure = {}
 
 # =========================
-# STRATEGY TRACKING
+# STRATEGY PERFORMANCE
 # =========================
 def update_strategy_metrics(strategy, pnl):
+
     if strategy not in strategy_stats:
         strategy_stats[strategy] = {
             "trades": 0,
@@ -36,12 +37,15 @@ def update_capital_rotation():
 
     scores = {}
 
-    for k, v in strategy_stats.items():
-        if v["trades"] == 0:
+    for name, s in strategy_stats.items():
+
+        if s["trades"] == 0:
             continue
 
-        win_rate = v["wins"] / v["trades"]
-        scores[k] = v["pnl"] * win_rate
+        win_rate = s["wins"] / s["trades"]
+
+        # combined performance score
+        scores[name] = s["pnl"] * win_rate
 
 
     if not scores:
@@ -50,10 +54,10 @@ def update_capital_rotation():
     best = max(scores.values())
     worst = min(scores.values())
 
-    for k, score in scores.items():
+    for name, score in scores.items():
 
-        if k not in capital_rotation_state:
-            capital_rotation_state[k] = {
+        if name not in capital_rotation_state:
+            capital_rotation_state[name] = {
                 "allocation": 1.0,
                 "disabled": False
             }
@@ -65,22 +69,25 @@ def update_capital_rotation():
 
         allocation = 0.3 + (norm * 1.7)
 
-        capital_rotation_state[k]["allocation"] = allocation
+        capital_rotation_state[name]["allocation"] = allocation
 
-        # auto disable
+        # AUTO DISABLE RULES
         if score < -0.5:
-            capital_rotation_state[k]["disabled"] = True
+            capital_rotation_state[name]["disabled"] = True
         elif score > 0:
-            capital_rotation_state[k]["disabled"] = False
+            capital_rotation_state[name]["disabled"] = False
 
 
 def get_allocation(strategy):
+
     if strategy not in capital_rotation_state:
         return 1.0
+
     return capital_rotation_state[strategy]["allocation"]
 
 
 def is_disabled(strategy):
+
     return capital_rotation_state.get(strategy, {}).get("disabled", False)
 
 
@@ -93,19 +100,14 @@ CORRELATION_GROUPS = {
     "SMALL_GROUP": ["LTCUSDT", "ATOMUSDT"]
 }
 
-correlation_exposure = {}
 
-
-def update_correlation(symbol, signal_strength=1):
+def update_correlation(symbol):
 
     for group, symbols in CORRELATION_GROUPS.items():
 
         if symbol in symbols:
 
-            if group not in correlation_exposure:
-                correlation_exposure[group] = 0
-
-            correlation_exposure[group] += signal_strength
+            correlation_exposure[group] = correlation_exposure.get(group, 0) + 1
 
 
 def correlation_block(symbol):
@@ -116,8 +118,12 @@ def correlation_block(symbol):
 
             exposure = correlation_exposure.get(group, 0)
 
-            # limit overexposure
             if exposure > 3:
                 return True
 
     return False
+
+
+def reset_correlation():
+    global correlation_exposure
+    correlation_exposure = {}
