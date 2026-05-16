@@ -1,0 +1,24 @@
+from strategies import (
+    mean_reversion,
+    breakout,
+    momentum,
+    kst,
+    trend_strength_crossover
+)
+
+STRATEGY_REGISTRY = {
+
+    "mean_reversion": mean_reversion,
+    "breakout": breakout,
+    "momentum": momentum,
+    "kst": kst,
+    "trend_strength_crossover": trend_strength_crossover
+}
+
+
+def get_strategy(name):
+    return STRATEGY_REGISTRY.get(name, None)
+
+
+def list_strategies():
+    return list(STRATEGY_REGISTRY.keys())
