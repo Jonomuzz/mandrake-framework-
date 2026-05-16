@@ -1,14 +1,17 @@
 import time
-import requests
 import os
+import requests
 import pandas as pd
 
-from strategies import mean_reversion, trend, breakout, momentum
-from analytics import load, save, update_trade, compute_metrics
+from strategies import (
+    mean_reversion,
+    trend_ma_crossover,
+    breakout,
+    momentum,
+    kst
+)
 
-# ----------------------------
-# CONFIG
-# ----------------------------
+# ================= CONFIG =================
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
     "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
@@ -16,193 +19,111 @@ SYMBOLS = [
 ]
 
 INTERVAL = "1m"
-CANDLE_LIMIT = 50
-BASE_URL = "https://api.binance.com/api/v3/klines"
+LIMIT = 100
+SLEEP = 60
 
-# ----------------------------
-# ENV
-# ----------------------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("ALERT_CHAT_ID")
 
-BOT_NAME = os.getenv("BOT_NAME", "mandrake-bot")
-ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
+BASE_URL = "https://api.binance.com/api/v3/klines"
 
-# ----------------------------
-# DEBUG MODE (TURN ON/OFF)
-# ----------------------------
-FAST_DIAGNOSIS = True   # <-- SET False later when stable
 
-# ----------------------------
-# ANALYTICS
-# ----------------------------
-analytics = load()
-
-# ----------------------------
-# TELEGRAM
-# ----------------------------
-def send_telegram(message):
+# ================= TELEGRAM =================
+def send_telegram(msg):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("❌ Telegram not configured")
+        print("Telegram not configured")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-    try:
-        requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": message
-        }, timeout=10)
-    except Exception as e:
-        print("Telegram error:", e)
 
-# ----------------------------
-# DATA
-# ----------------------------
+# ================= DATA =================
 def get_klines(symbol):
-    params = {
-        "symbol": symbol,
-        "interval": INTERVAL,
-        "limit": CANDLE_LIMIT
-    }
-
-    r = requests.get(BASE_URL, params=params, timeout=10)
+    params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
+    r = requests.get(BASE_URL, params=params)
     data = r.json()
 
-    df = pd.DataFrame(data, columns=[
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"
-    ])
-
-    df["close"] = df["close"].astype(float)
+    df = pd.DataFrame(data)
+    df["close"] = df[4].astype(float)
     return df
 
-# ----------------------------
-# STRATEGY ROUTER
-# ----------------------------
-def get_signal(df):
-    global ACTIVE_STRATEGY
 
-    if ACTIVE_STRATEGY == "mean_reversion":
+# ================= REGIME DETECTOR =================
+def select_strategy(df):
+    ma20 = df["close"].rolling(20).mean()
+    slope = ma20.diff().iloc[-1]
+    vol = df["close"].rolling(20).std().iloc[-1]
+    price = df["close"].iloc[-1]
+
+    vol_ratio = vol / price
+
+    # TREND
+    if abs(slope) > vol * 0.15:
+        return "trend"
+
+    # BREAKOUT
+    if vol_ratio > 0.01:
+        return "breakout"
+
+    # MOMENTUM (added layer)
+    if slope > 0 and vol_ratio < 0.006:
+        return "momentum"
+
+    # DEFAULT
+    return "mean_reversion"
+
+
+# ================= ROUTER =================
+def get_signal(df, strategy):
+
+    if strategy == "trend":
+        df = trend_ma_crossover.calculate_indicators(df)
+        return trend_ma_crossover.check_signal(df)
+
+    if strategy == "mean_reversion":
         df = mean_reversion.calculate_indicators(df)
         return mean_reversion.check_signal(df)
 
-    elif ACTIVE_STRATEGY == "trend":
-        df = trend.calculate_indicators(df)
-        return trend.check_signal(df)
-
-    elif ACTIVE_STRATEGY == "breakout":
+    if strategy == "breakout":
         df = breakout.calculate_indicators(df)
         return breakout.check_signal(df)
 
-    elif ACTIVE_STRATEGY == "momentum":
+    if strategy == "momentum":
         df = momentum.calculate_indicators(df)
         return momentum.check_signal(df)
 
     return None
 
-# ----------------------------
-# POSITION TRACKING
-# ----------------------------
-positions = {}
 
-def open_position(bot, symbol, side, price):
-    positions[(bot, symbol)] = {
-        "side": side,
-        "entry": price
-    }
+# ================= MAIN LOOP =================
+def run():
+    print("🚀 SWITCHER ENGINE STARTED")
 
-def close_position(bot, symbol, price):
-    key = (bot, symbol)
-
-    if key not in positions:
-        return None
-
-    pos = positions.pop(key)
-    entry = pos["entry"]
-
-    if pos["side"] == "BUY":
-        pnl = ((price - entry) / entry) * 100
-    else:
-        pnl = ((entry - price) / entry) * 100
-
-    return {
-        "symbol": symbol,
-        "side": pos["side"],
-        "entry": entry,
-        "exit": price,
-        "pnl": pnl
-    }
-
-# ----------------------------
-# MAIN LOOP
-# ----------------------------
-def run_bot():
-    print(f"🤖 Bot started: {BOT_NAME} | Strategy: {ACTIVE_STRATEGY}")
-
-    send_telegram(f"🤖 {BOT_NAME} STARTED | Strategy: {ACTIVE_STRATEGY}")
+    send_telegram("🚀 SWITCHER ENGINE STARTED")
 
     while True:
         for symbol in SYMBOLS:
             try:
                 df = get_klines(symbol)
-                price = df.iloc[-1]["close"]
 
-                signal = get_signal(df)
+                strategy = select_strategy(df)
+                signal = get_signal(df, strategy)
 
-                # ----------------------------
-                # FAST DIAGNOSIS OUTPUT
-                # ----------------------------
-                if FAST_DIAGNOSIS:
-                    print(
-                        f"[DEBUG] {symbol} | "
-                        f"Price={price} | "
-                        f"Signal={signal} | "
-                        f"Strategy={ACTIVE_STRATEGY}"
-                    )
+                price = df["close"].iloc[-1]
 
-                # ----------------------------
-                # ENTRY
-                # ----------------------------
-                if signal == "BUY":
-                    if (BOT_NAME, symbol) not in positions:
-                        open_position(BOT_NAME, symbol, "BUY", price)
+                print(f"[{symbol}] Strategy={strategy} Signal={signal}")
 
-                        send_telegram(
-                            f"🟢 {BOT_NAME} OPEN BUY\n{symbol} @ {price}"
-                        )
-
-                # ----------------------------
-                # EXIT
-                # ----------------------------
-                elif signal == "SELL":
-                    trade = close_position(BOT_NAME, symbol, price)
-
-                    if trade:
-                        update_trade(analytics, BOT_NAME, symbol, trade["pnl"])
-                        save(analytics)
-
-                        metrics = compute_metrics(analytics[BOT_NAME][symbol])
-
-                        send_telegram(
-                            f"🔴 {BOT_NAME} CLOSE TRADE\n"
-                            f"{symbol}\n"
-                            f"PnL: {trade['pnl']:.2f}%\n"
-                            f"Entry: {trade['entry']}\n"
-                            f"Exit: {trade['exit']}\n\n"
-                            f"📊 METRICS\n"
-                            f"Trades: {metrics['trades']}\n"
-                            f"Win Rate: {metrics['win_rate']:.1f}%\n"
-                            f"Profit: {metrics['profit']}\n"
-                            f"Max DD: {metrics['max_drawdown']}"
-                        )
+                if signal:
+                    msg = f"{symbol} | {strategy.upper()} | {signal} @ {price}"
+                    send_telegram(msg)
 
             except Exception as e:
-                print(f"Error {symbol}:", e)
+                print(f"Error {symbol}: {e}")
 
-        print("Cycle complete. Sleeping...\n")
-        time.sleep(60)
+        print("Cycle complete...\n")
+        time.sleep(SLEEP)
 
 
 if __name__ == "__main__":
-    run_bot()
+    run()
