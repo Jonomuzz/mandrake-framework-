@@ -1,278 +1,196 @@
 import time
+import requests
+import os
+from collections import defaultdict
+import pandas as pd
 
-from core.config import ACTIVE_STRATEGY
-from core.config import PAIRS
-from core.config import SLEEP
-from core.config import START_BALANCE_PER_PAIR
+from strategies import mean_reversion, trend, breakout, momentum
+from analytics import load, save, update_trade, compute_metrics
 
-from core.data import get_klines
-from core.telegram import send_telegram
+# ----------------------------
+# CONFIG
+# ----------------------------
+SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
+    "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
+]
 
-from core.metrics import (
-    load_metrics,
-    update_metrics,
-    calculate_advanced_metrics
-)
+INTERVAL = "1m"
+CANDLE_LIMIT = 50
+BASE_URL = "https://api.binance.com/api/v3/klines"
 
-# =========================
-# STRATEGY LOADER
-# =========================
-if ACTIVE_STRATEGY == "trend":
+# ----------------------------
+# ENV
+# ----------------------------
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("ALERT_CHAT_ID")
 
-    from strategies.trend import (
-        calculate_indicators,
-        check_signal
-    )
+BOT_NAME = os.getenv("BOT_NAME", "mandrake-bot")
+ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "trend")
 
-elif ACTIVE_STRATEGY == "mean_reversion":
+# ----------------------------
+# ANALYTICS STATE
+# ----------------------------
+analytics = load()
 
-    from strategies.mean_reversion import (
-        calculate_indicators,
-        check_signal
-    )
+# ----------------------------
+# TELEGRAM
+# ----------------------------
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("❌ Telegram not configured")
+        return
 
-elif ACTIVE_STRATEGY == "breakout":
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    from strategies.breakout import (
-        calculate_indicators,
-        check_signal
-    )
+    try:
+        requests.post(url, data={
+            "chat_id": CHAT_ID,
+            "text": message
+        }, timeout=10)
+    except Exception as e:
+        print("Telegram error:", e)
 
-elif ACTIVE_STRATEGY == "momentum":
+# ----------------------------
+# DATA
+# ----------------------------
+def get_klines(symbol):
+    params = {
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": CANDLE_LIMIT
+    }
 
-    from strategies.momentum import (
-        calculate_indicators,
-        check_signal
-    )
+    r = requests.get(BASE_URL, params=params, timeout=10)
+    data = r.json()
 
-elif ACTIVE_STRATEGY == "kst":
+    df = pd.DataFrame(data, columns=[
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"
+    ])
 
-    from strategies.kst import (
-        calculate_indicators,
-        check_signal
-    )
+    df["close"] = df["close"].astype(float)
+    return df
 
-else:
-    raise Exception(
-        f"Unknown strategy: {ACTIVE_STRATEGY}"
-    )
+# ----------------------------
+# STRATEGY ROUTER
+# ----------------------------
+def get_signal(df):
+    global ACTIVE_STRATEGY
 
-# =========================
-# PAPER TRADING STATE
-# =========================
-balances = {}
-positions = {}
+    if ACTIVE_STRATEGY == "mean_reversion":
+        df = mean_reversion.calculate_indicators(df)
+        return mean_reversion.check_signal(df)
 
-# =========================
-# INITIALIZE
-# =========================
-for pair in PAIRS:
+    elif ACTIVE_STRATEGY == "trend":
+        df = trend.calculate_indicators(df)
+        return trend.check_signal(df)
 
-    balances[pair] = START_BALANCE_PER_PAIR
+    elif ACTIVE_STRATEGY == "breakout":
+        df = breakout.calculate_indicators(df)
+        return breakout.check_signal(df)
 
-    positions[pair] = None
+    elif ACTIVE_STRATEGY == "momentum":
+        df = momentum.calculate_indicators(df)
+        return momentum.check_signal(df)
 
-# =========================
-# METRICS
-# =========================
-metrics = load_metrics()
+    return None
 
-# =========================
-# STARTUP
-# =========================
-print("FRAMEWORK BOT RUNNING")
+# ----------------------------
+# TRADE SIMULATION (ENTRY/EXIT ENGINE)
+# ----------------------------
+positions = {}  # key: (bot, symbol)
 
-send_telegram(
-    f"🤖 Bot Started\n"
-    f"Strategy: {ACTIVE_STRATEGY}"
-)
 
-# =========================
+def open_position(bot, symbol, side, price):
+    positions[(bot, symbol)] = {
+        "side": side,
+        "entry": price
+    }
+
+
+def close_position(bot, symbol, price):
+    key = (bot, symbol)
+
+    if key not in positions:
+        return None
+
+    pos = positions.pop(key)
+    entry = pos["entry"]
+
+    if pos["side"] == "BUY":
+        pnl = ((price - entry) / entry) * 100
+    else:
+        pnl = ((entry - price) / entry) * 100
+
+    return {
+        "symbol": symbol,
+        "side": pos["side"],
+        "entry": entry,
+        "exit": price,
+        "pnl": pnl
+    }
+
+# ----------------------------
 # MAIN LOOP
-# =========================
-while True:
+# ----------------------------
+def run_bot():
+    print(f"🤖 Bot started: {BOT_NAME} | Strategy: {ACTIVE_STRATEGY}")
 
-    for pair in PAIRS:
+    send_telegram(f"🤖 {BOT_NAME} STARTED | Strategy: {ACTIVE_STRATEGY}")
 
-        try:
+    while True:
+        for symbol in SYMBOLS:
+            try:
+                df = get_klines(symbol)
+                price = df.iloc[-1]["close"]
 
-            print(f"Checking {pair}...")
+                signal = get_signal(df)
 
-            df = get_klines(pair)
+                # ----------------------------
+                # ENTRY
+                # ----------------------------
+                if signal == "BUY":
+                    if (BOT_NAME, symbol) not in positions:
+                        open_position(BOT_NAME, symbol, "BUY", price)
 
-            df = calculate_indicators(df)
-
-            signal = check_signal(df)
-
-            print(f"{pair} signal: {signal}")
-
-            current_price = df.iloc[-1]["close"]
-
-            # =========================
-            # OPEN TRADE
-            # =========================
-            if (
-                positions[pair] is None
-                and signal is not None
-            ):
-
-                positions[pair] = {
-                    "side": signal,
-                    "entry": current_price
-                }
-
-                send_telegram(
-                    f"🚀 TRADE OPENED\n\n"
-                    f"Strategy: {ACTIVE_STRATEGY}\n"
-                    f"Pair: {pair}\n"
-                    f"Side: {signal}\n"
-                    f"Entry: {round(current_price, 4)}"
-                )
-
-            # =========================
-            # MANAGE OPEN TRADE
-            # =========================
-            elif positions[pair] is not None:
-
-                entry_price = (
-                    positions[pair]["entry"]
-                )
-
-                side = (
-                    positions[pair]["side"]
-                )
-
-                pnl_pct = 0
-
-                # =========================
-                # BUY TRADE
-                # =========================
-                if side == "BUY":
-
-                    pnl_pct = (
-                        current_price
-                        - entry_price
-                    ) / entry_price
-
-                # =========================
-                # SELL TRADE
-                # =========================
-                elif side == "SELL":
-
-                    pnl_pct = (
-                        entry_price
-                        - current_price
-                    ) / entry_price
-
-                # =========================
-                # EXIT CONDITIONS
-                # =========================
-                TAKE_PROFIT = 0.003
-                STOP_LOSS = -0.002
-
-                if (
-                    pnl_pct >= TAKE_PROFIT
-                    or pnl_pct <= STOP_LOSS
-                ):
-
-                    pnl_dollars = (
-                        balances[pair]
-                        * pnl_pct
-                    )
-
-                    balances[pair] += pnl_dollars
-
-                    update_metrics(
-                        metrics,
-                        pnl_dollars,
-                        balances[pair]
-                    )
-
-                    advanced = (
-                        calculate_advanced_metrics(
-                            metrics
+                        send_telegram(
+                            f"🟢 {BOT_NAME} | {ACTIVE_STRATEGY}\n"
+                            f"OPEN BUY {symbol} @ {price}"
                         )
-                    )
 
-                    message = (
-                        f"✅ TRADE CLOSED\n\n"
-                    )
+                # ----------------------------
+                # EXIT
+                # ----------------------------
+                elif signal == "SELL":
+                    trade = close_position(BOT_NAME, symbol, price)
 
-                    message += (
-                        f"Strategy: "
-                        f"{ACTIVE_STRATEGY}\n"
-                    )
+                    if trade:
+                        update_trade(analytics, BOT_NAME, symbol, trade["pnl"])
+                        save(analytics)
 
-                    message += (
-                        f"Pair: {pair}\n"
-                    )
+                        metrics = compute_metrics(analytics[BOT_NAME][symbol])
 
-                    message += (
-                        f"Side: {side}\n"
-                    )
+                        send_telegram(
+                            f"🔴 {BOT_NAME} | {ACTIVE_STRATEGY}\n"
+                            f"CLOSE TRADE {symbol}\n"
+                            f"PnL: {trade['pnl']:.2f}%\n"
+                            f"Entry: {trade['entry']}\n"
+                            f"Exit: {trade['exit']}\n\n"
+                            f"📊 METRICS\n"
+                            f"Trades: {metrics['trades']}\n"
+                            f"Win Rate: {metrics['win_rate']:.1f}%\n"
+                            f"Profit: {metrics['profit']}\n"
+                            f"Max DD: {metrics['max_drawdown']}"
+                        )
 
-                    message += (
-                        f"PnL: "
-                        f"${round(pnl_dollars, 2)}\n"
-                    )
+            except Exception as e:
+                print(f"Error {symbol}:", e)
 
-                    message += (
-                        f"Balance: "
-                        f"${round(balances[pair], 2)}\n"
-                    )
+        print("Cycle complete. Sleeping...\n")
+        time.sleep(60)
 
-                    message += "\n📊 ADVANCED METRICS\n"
 
-                    message += (
-                        f"Win Rate: "
-                        f"{advanced['win_rate']}%\n"
-                    )
-
-                    message += (
-                        f"Average Win: "
-                        f"${advanced['avg_win']}\n"
-                    )
-
-                    message += (
-                        f"Average Loss: "
-                        f"${advanced['avg_loss']}\n"
-                    )
-
-                    message += (
-                        f"Profit Factor: "
-                        f"{advanced['profit_factor']}\n"
-                    )
-
-                    message += (
-                        f"Max Drawdown: "
-                        f"${advanced['max_drawdown']}\n"
-                    )
-
-                    message += (
-                        f"Max Consecutive Losses: "
-                        f"{advanced['max_consecutive_losses']}\n"
-                    )
-
-                    message += (
-                        f"Largest Win: "
-                        f"${advanced['largest_win']}\n"
-                    )
-
-                    message += (
-                        f"Largest Loss: "
-                        f"${advanced['largest_loss']}\n"
-                    )
-
-                    send_telegram(message)
-
-                    positions[pair] = None
-
-        except Exception as e:
-
-            print(
-                f"ERROR WITH {pair}: {e}"
-            )
-
-    print("Cycle complete. Sleeping...")
-
-    time.sleep(SLEEP)
+if __name__ == "__main__":
+    run_bot()
