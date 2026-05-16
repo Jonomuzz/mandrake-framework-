@@ -1,5 +1,4 @@
 import time
-import os
 import requests
 import pandas as pd
 
@@ -20,6 +19,9 @@ from core.metrics import (
     correlation_block,
     reset_correlation
 )
+
+from core.regime import detect_regime, get_regime_bias
+
 from core.telegram import send_telegram
 
 BASE_URL = "https://api.binance.com/api/v3/klines"
@@ -27,8 +29,16 @@ INTERVAL = "1m"
 LIMIT = 100
 
 
+# =========================
+# DATA
+# =========================
 def get_klines(symbol):
-    params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
+    params = {
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": LIMIT
+    }
+
     r = requests.get(BASE_URL, params=params)
     data = r.json()
 
@@ -37,6 +47,9 @@ def get_klines(symbol):
     return df
 
 
+# =========================
+# STRATEGY SELECTOR
+# =========================
 def select_strategy(df):
 
     ma20 = df["close"].rolling(20).mean()
@@ -58,6 +71,9 @@ def select_strategy(df):
     return "mean_reversion"
 
 
+# =========================
+# ROUTER
+# =========================
 def get_signal(df, strategy):
 
     if strategy == "trend_ma_crossover":
@@ -76,13 +92,20 @@ def get_signal(df, strategy):
         df = momentum.calculate_indicators(df)
         return momentum.check_signal(df)
 
+    if strategy == "kst":
+        df = kst.calculate_indicators(df)
+        return kst.check_signal(df)
+
     return None
 
 
+# =========================
+# MAIN LOOP
+# =========================
 def run():
 
-    print("🚀 ENGINE STARTED")
-    send_telegram("🚀 ENGINE STARTED")
+    print("🚀 SWITCHER + REGIME ENGINE STARTED")
+    send_telegram("🚀 SWITCHER + REGIME ENGINE STARTED")
 
     initialize_pairs(PAIRS)
 
@@ -95,8 +118,23 @@ def run():
             try:
                 df = get_klines(symbol)
 
+                # =========================
+                # REGIME ENGINE
+                # =========================
+                regime = detect_regime(df)
+                bias = get_regime_bias()
+
                 strategy = select_strategy(df)
 
+                # regime suppression / weighting
+                if strategy in bias:
+                    weight = bias[strategy]
+
+                    if weight < 0.7:
+                        print(f"[BLOCKED] {symbol} | {strategy} | {regime}")
+                        continue
+
+                # safety layers
                 if is_disabled(strategy):
                     continue
 
@@ -106,14 +144,14 @@ def run():
                 signal = get_signal(df, strategy)
                 price = df["close"].iloc[-1]
 
-                print(symbol, strategy, signal)
+                print(f"[{symbol}] Regime={regime} Strategy={strategy} Signal={signal}")
 
                 if signal:
                     update_correlation(symbol)
                     handle_trade(symbol, signal, price, strategy)
 
             except Exception as e:
-                print("Error:", symbol, e)
+                print(f"Error {symbol}: {e}")
 
         update_capital_rotation()
 
