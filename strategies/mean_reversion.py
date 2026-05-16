@@ -20,7 +20,9 @@ def check_signal(df):
         return "BUY"
 
     # SELL REVERSION
-    if curr["close"] > curr["ma20"]:
-        return "SELL"
+    if (
+    curr["close"] > curr["upper_band"]
+):
+    return "SELL"
 
     return None
