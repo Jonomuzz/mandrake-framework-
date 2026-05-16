@@ -11,34 +11,16 @@ from strategies import (
     kst
 )
 
-# ================= CONFIG =================
-SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
-    "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
-]
-
-INTERVAL = "1m"
-LIMIT = 100
-SLEEP = 60
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("ALERT_CHAT_ID")
+from core.config import PAIRS, SLEEP, ACTIVE_STRATEGY
+from core.execution import handle_trade, initialize_pairs
+from core.metrics import evaluate_strategies, get_leaderboard, strategy_stats
+from core.telegram import send_telegram
 
 BASE_URL = "https://api.binance.com/api/v3/klines"
+INTERVAL = "1m"
+LIMIT = 100
 
 
-# ================= TELEGRAM =================
-def send_telegram(msg):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Telegram not configured")
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-
-
-# ================= DATA =================
 def get_klines(symbol):
     params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
     r = requests.get(BASE_URL, params=params)
@@ -49,7 +31,6 @@ def get_klines(symbol):
     return df
 
 
-# ================= REGIME DETECTOR =================
 def select_strategy(df):
     ma20 = df["close"].rolling(20).mean()
     slope = ma20.diff().iloc[-1]
@@ -58,26 +39,21 @@ def select_strategy(df):
 
     vol_ratio = vol / price
 
-    # TREND
     if abs(slope) > vol * 0.15:
-        return "trend"
+        return "trend_ma_crossover"
 
-    # BREAKOUT
     if vol_ratio > 0.01:
         return "breakout"
 
-    # MOMENTUM (added layer)
     if slope > 0 and vol_ratio < 0.006:
         return "momentum"
 
-    # DEFAULT
     return "mean_reversion"
 
 
-# ================= ROUTER =================
 def get_signal(df, strategy):
 
-    if strategy == "trend":
+    if strategy == "trend_ma_crossover":
         df = trend_ma_crossover.calculate_indicators(df)
         return trend_ma_crossover.check_signal(df)
 
@@ -96,30 +72,36 @@ def get_signal(df, strategy):
     return None
 
 
-# ================= MAIN LOOP =================
 def run():
     print("🚀 SWITCHER ENGINE STARTED")
-
     send_telegram("🚀 SWITCHER ENGINE STARTED")
 
+    initialize_pairs(PAIRS)
+
     while True:
-        for symbol in SYMBOLS:
+
+        for symbol in PAIRS:
+
             try:
                 df = get_klines(symbol)
 
                 strategy = select_strategy(df)
-                signal = get_signal(df, strategy)
 
+                if strategy_stats.get(strategy, {}).get("disabled"):
+                    continue
+
+                signal = get_signal(df, strategy)
                 price = df["close"].iloc[-1]
 
-                print(f"[{symbol}] Strategy={strategy} Signal={signal}")
+                print(f"[{symbol}] {strategy} => {signal}")
 
                 if signal:
-                    msg = f"{symbol} | {strategy.upper()} | {signal} @ {price}"
-                    send_telegram(msg)
+                    handle_trade(symbol, signal, price, strategy)
 
             except Exception as e:
                 print(f"Error {symbol}: {e}")
+
+        evaluate_strategies()
 
         print("Cycle complete...\n")
         time.sleep(SLEEP)
