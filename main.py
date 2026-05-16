@@ -2,16 +2,9 @@ import time
 import requests
 import pandas as pd
 
-from strategies import (
-    mean_reversion,
-    trend_strength_crossover,
-    breakout,
-    momentum,
-    kst
-)
-
 from core.config import PAIRS, SLEEP
 from core.execution import handle_trade, initialize_pairs
+
 from core.metrics import (
     update_capital_rotation,
     is_disabled,
@@ -21,6 +14,7 @@ from core.metrics import (
 )
 
 from core.regime import detect_regime, get_regime_bias
+from core.strategy_registry import get_strategy
 
 from core.telegram import send_telegram
 
@@ -33,6 +27,7 @@ LIMIT = 100
 # DATA
 # =========================
 def get_klines(symbol):
+
     params = {
         "symbol": symbol,
         "interval": INTERVAL,
@@ -44,6 +39,7 @@ def get_klines(symbol):
 
     df = pd.DataFrame(data)
     df["close"] = df[4].astype(float)
+
     return df
 
 
@@ -60,7 +56,7 @@ def select_strategy(df):
     vol_ratio = vol / price
 
     if abs(slope) > vol * 0.15:
-        return "trend_ma_crossover"
+        return "trend_strength_crossover"
 
     if vol_ratio > 0.01:
         return "breakout"
@@ -72,31 +68,18 @@ def select_strategy(df):
 
 
 # =========================
-# ROUTER
+# SIGNAL ENGINE (NEW)
 # =========================
-def get_signal(df, strategy):
+def get_signal(df, strategy_name):
 
-    if strategy == "trend_ma_crossover":
-        df = trend_ma_crossover.calculate_indicators(df)
-        return trend_ma_crossover.check_signal(df)
+    strategy = get_strategy(strategy_name)
 
-    if strategy == "mean_reversion":
-        df = mean_reversion.calculate_indicators(df)
-        return mean_reversion.check_signal(df)
+    if strategy is None:
+        return None
 
-    if strategy == "breakout":
-        df = breakout.calculate_indicators(df)
-        return breakout.check_signal(df)
+    df = strategy.calculate_indicators(df)
 
-    if strategy == "momentum":
-        df = momentum.calculate_indicators(df)
-        return momentum.check_signal(df)
-
-    if strategy == "kst":
-        df = kst.calculate_indicators(df)
-        return kst.check_signal(df)
-
-    return None
+    return strategy.check_signal(df)
 
 
 # =========================
@@ -104,8 +87,8 @@ def get_signal(df, strategy):
 # =========================
 def run():
 
-    print("🚀 SWITCHER + REGIME ENGINE STARTED")
-    send_telegram("🚀 SWITCHER + REGIME ENGINE STARTED")
+    print("🚀 STRATEGY REGISTRY ENGINE STARTED")
+    send_telegram("🚀 STRATEGY REGISTRY ENGINE STARTED")
 
     initialize_pairs(PAIRS)
 
@@ -126,19 +109,17 @@ def run():
 
                 strategy = select_strategy(df)
 
-                # regime suppression / weighting
-                if strategy in bias:
-                    weight = bias[strategy]
-
-                    if weight < 0.7:
-                        print(f"[BLOCKED] {symbol} | {strategy} | {regime}")
-                        continue
-
-                # safety layers
+                # =========================
+                # SAFETY FILTERS
+                # =========================
                 if is_disabled(strategy):
                     continue
 
                 if correlation_block(symbol):
+                    continue
+
+                # regime weighting
+                if strategy in bias and bias[strategy] < 0.7:
                     continue
 
                 signal = get_signal(df, strategy)
@@ -146,6 +127,9 @@ def run():
 
                 print(f"[{symbol}] Regime={regime} Strategy={strategy} Signal={signal}")
 
+                # =========================
+                # EXECUTION
+                # =========================
                 if signal:
                     update_correlation(symbol)
                     handle_trade(symbol, signal, price, strategy)
