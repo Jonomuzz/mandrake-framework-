@@ -66,7 +66,9 @@ def process_trade(
                 f"PnL: {round(pnl_pct, 2)}%"
             )
 
-            record_trade(pnl_pct)
+            from core.portfolio import update_portfolio
+
+            update_portfolio(portfolio, symbol, pnl_pct)
 
             close_position(symbol)
 
