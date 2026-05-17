@@ -1,31 +1,20 @@
-
 def calculate_indicators(df):
-    df["returns"] = df["close"].pct_change()
-
-    df["momentum"] = df["returns"].rolling(window=5).sum()
-    df["volume_ma"] = df["volume"].astype(float).rolling(window=10).mean()
-
+    df["ret"] = df["close"].pct_change()
+    df["momentum"] = df["ret"].rolling(10).mean()
     return df
 
 
-
 def check_signal(df):
-    if len(df) < 20:
-        return None
+    m = df["momentum"].iloc[-1]
 
-    curr = df.iloc[-1]
-
-    volume_spike = float(curr["volume"]) > (curr["volume_ma"] * 1.5)
-
-    # BUY MOMENTUM
-    if (
-        curr["momentum"] > 0.01 and
-        volume_spike
-    ):
+    if m > 0.002:
         return "BUY"
-
-    # SELL WEAKNESS
-    if curr["momentum"] < -0.005:
+    elif m < -0.002:
         return "SELL"
 
     return None
+
+
+def get_signal(df):
+    df = calculate_indicators(df)
+    return check_signal(df)
