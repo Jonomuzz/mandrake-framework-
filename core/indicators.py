@@ -4,114 +4,61 @@ import pandas as pd
 def build_indicators(df):
 
     # =========================
+    # BASIC PRICES
+    # =========================
+    df["close"] = df["close"].astype(float)
+    df["high"] = df["high"].astype(float)
+    df["low"] = df["low"].astype(float)
+    df["volume"] = df["volume"].astype(float)
+
+    # =========================
     # MOVING AVERAGES
     # =========================
-    df["ma5"] = (
-        df["close"]
-        .rolling(5)
-        .mean()
-    )
-
-    df["ma20"] = (
-        df["close"]
-        .rolling(20)
-        .mean()
-    )
-
-    df["ma50"] = (
-        df["close"]
-        .rolling(50)
-        .mean()
-    )
+    df["ma5"] = df["close"].rolling(5).mean()
+    df["ma20"] = df["close"].rolling(20).mean()
+    df["ma50"] = df["close"].rolling(50).mean()
 
     # =========================
-    # MA20 STD
+    # MA DERIVATIVES
     # =========================
-    df["ma20_std"] = (
-        df["ma20"]
-        .rolling(20)
-        .std()
-    )
+    df["ma20_slope"] = df["ma20"].diff()
+    df["ma20_std"] = df["ma20"].rolling(20).std()
 
     # =========================
-    # MA20 SLOPE
+    # TREND + VOLATILITY
     # =========================
-    df["ma20_slope"] = (
-        df["ma20"]
-        .diff()
-    )
-
-    # =========================
-    # TREND STRENGTH
-    # =========================
-    df["trend_strength"] = (
-        df["ma20"]
-        .diff()
-    )
-
-    # =========================
-    # VOLATILITY
-    # =========================
-    df["volatility"] = (
-        df["close"]
-        .rolling(20)
-        .std()
-    )
+    df["trend_strength"] = df["ma20"].diff()
+    df["volatility"] = df["close"].rolling(20).std()
 
     # =========================
     # Z SCORE
     # =========================
-    rolling_std = (
-        df["close"]
-        .rolling(20)
-        .std()
-    )
-
-    df["zscore"] = (
-        (df["close"] - df["ma20"])
-        / rolling_std
-    )
+    rolling_std = df["close"].rolling(20).std()
+    df["zscore"] = (df["close"] - df["ma20"]) / rolling_std
 
     # =========================
-    # VOLUME
+    # VOLUME FEATURES
     # =========================
-    df["volume_ma"] = (
-        df["volume"]
-        .rolling(20)
-        .mean()
-    )
+    df["volume_ma"] = df["volume"].rolling(20).mean()
 
     # =========================
-    # RANGE
+    # RANGE FEATURES
     # =========================
-    df["range"] = (
-        df["high"] - df["low"]
-    )
+    df["range"] = df["high"] - df["low"]
+    df["avg_range"] = df["range"].rolling(14).mean()
 
     # =========================
-    # AVERAGE RANGE
+    # HIGH / LOW ROLLING FEATURES (FIX FOR YOUR ERROR)
     # =========================
-    df["avg_range"] = (
-        df["range"]
-        .rolling(14)
-        .mean()
-    )
+    df["high_20"] = df["high"].rolling(20).max()
+    df["low_20"] = df["low"].rolling(20).min()
 
-    # =========================
-    # RANGE MA
-    # =========================
-    df["range_ma"] = (
-        df["range"]
-        .rolling(14)
-        .mean()
-    )
+    df["high_50"] = df["high"].rolling(50).max()
+    df["low_50"] = df["low"].rolling(50).min()
 
     # =========================
     # MOMENTUM
     # =========================
-    df["momentum"] = (
-        df["close"]
-        - df["close"].shift(5)
-    )
+    df["momentum"] = df["close"] - df["close"].shift(5)
 
     return df
