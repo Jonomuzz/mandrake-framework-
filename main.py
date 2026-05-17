@@ -1,19 +1,16 @@
 import os
+import traceback
 import time
 
 from core.data import get_klines
 from core.notifications import send_telegram
 
-from strategies.mean_reversion import get_signal as mean_reversion
-from strategies.trend_strength_crossover import get_signal as trend
-from strategies.momentum import get_signal as momentum
-from strategies.breakout import get_signal as breakout
-from strategies.kst import get_signal as kst
+# Import strategies safely
+from strategies.mean_reversion import get_signal as mean_reversion_signal
+from strategies.trend import get_signal as trend_signal
+from strategies.momentum import get_signal as momentum_signal
+from strategies.breakout import get_signal as breakout_signal
 
-
-# =========================
-# CONFIG
-# =========================
 
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
@@ -23,94 +20,73 @@ SYMBOLS = [
 
 INTERVAL = "1m"
 LIMIT = 100
-SLEEP = 60
-
-STRATEGY_MAP = {
-    "mean_reversion": mean_reversion,
-    "trend": trend,
-    "momentum": momentum,
-    "breakout": breakout,
-    "kst": kst
-}
-
-# simple overtrade protection (cooldown per symbol)
-cooldown = {}
-COOLDOWN_CYCLES = 3
 
 
-# =========================
-# STRATEGY SELECTOR
-# =========================
-
-def select_strategy(symbol):
+def select_strategy(symbol, df):
     """
-    Simple deterministic routing (can be upgraded later)
+    Simple router (you can improve later)
     """
     if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
         return "trend"
-    elif symbol in ["SOLUSDT", "AVAXUSDT", "LTCUSDT"]:
+    elif symbol in ["SOLUSDT", "AVAXUSDT", "LINKUSDT"]:
         return "momentum"
-    elif symbol in ["DOGEUSDT", "XRPUSDT"]:
+    elif symbol in ["XRPUSDT", "ADAUSDT", "DOGEUSDT"]:
         return "breakout"
     else:
         return "mean_reversion"
 
 
-# =========================
-# COOLDOWN FILTER
-# =========================
+def run_strategy(strategy_name, df, symbol):
+    """
+    Central execution wrapper (IMPORTANT FOR DEBUGGING)
+    """
+    print(f"▶ Running strategy: {strategy_name} | {symbol}")
 
-def can_trade(symbol):
-    return cooldown.get(symbol, 0) == 0
+    if strategy_name == "trend":
+        return trend_signal(df)
 
+    if strategy_name == "momentum":
+        return momentum_signal(df)
 
-def apply_cooldown(symbol):
-    cooldown[symbol] = COOLDOWN_CYCLES
+    if strategy_name == "breakout":
+        return breakout_signal(df)
 
+    return mean_reversion_signal(df)
 
-def reduce_cooldowns():
-    for k in list(cooldown.keys()):
-        cooldown[k] -= 1
-        if cooldown[k] <= 0:
-            del cooldown[k]
-
-
-# =========================
-# MAIN LOOP
-# =========================
 
 def run():
     print("🚀 FULL EXECUTION ENGINE STARTED")
-
     send_telegram("🚀 FULL EXECUTION ENGINE STARTED")
 
     while True:
-        for symbol in SYMBOLS:
 
+        for symbol in SYMBOLS:
             try:
+                print(f"\n📊 Processing {symbol}")
+
+                # STEP 1: Get data
                 df = get_klines(symbol, INTERVAL, LIMIT)
 
-                strategy_name = select_strategy(symbol)
-                strategy = STRATEGY_MAP[strategy_name]
+                # STEP 2: Choose strategy
+                strategy = select_strategy(symbol, df)
 
-                signal = strategy(df)
+                # STEP 3: Run strategy
+                signal = run_strategy(strategy, df, symbol)
 
-                print(f"{symbol} | {strategy_name} | {signal}")
+                # STEP 4: Output
+                print(f"{symbol} | {strategy} | {signal}")
 
-                # only act on real signals
-                if signal and can_trade(symbol):
-
-                    msg = f"{symbol} | {strategy_name.upper()} | {signal}"
+                # STEP 5: Notify only real signals
+                if signal:
+                    msg = f"{symbol} | {strategy.upper()} | {signal}"
                     send_telegram(msg)
 
-                    apply_cooldown(symbol)
-
             except Exception as e:
-                print(f"Error {symbol}: {e}")
+                print(f"\n❌ ERROR IN SYMBOL: {symbol}")
+                print(traceback.format_exc())  # 🔥 THIS IS THE KEY CHANGE
 
-        reduce_cooldowns()
         print("Cycle complete...\n")
-        time.sleep(SLEEP)
+        time.sleep(5)
 
 
 if __name__ == "__main__":
