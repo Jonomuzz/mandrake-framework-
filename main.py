@@ -1,143 +1,73 @@
 import time
-import requests
-import pandas as pd
 import os
+import pandas as pd
+import requests
 
-from core.config import PAIRS, SLEEP
-from core.execution import handle_trade, initialize_pairs
-from core.telegram import send_telegram
+from core.strategy_registry import get_strategy
+from core.position_manager import init
+from core.execution import execute
+from core.portfolio import portfolio
 
+SYMBOLS = [
+    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT",
+    "XRPUSDT","ADAUSDT","DOGEUSDT","AVAXUSDT",
+    "LINKUSDT","MATICUSDT","LTCUSDT","ATOMUSDT"
+]
 
-# =========================
-# BINANCE CONFIG
-# =========================
-BASE_URL = "https://api.binance.com/api/v3/klines"
 INTERVAL = "1m"
 LIMIT = 100
 
+BASE_URL = "https://api.binance.com/api/v3/klines"
 
-# =========================
-# DATA FETCH
-# =========================
+
 def get_klines(symbol):
-    params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
-    r = requests.get(BASE_URL, params=params)
+    r = requests.get(BASE_URL, params={
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": LIMIT
+    })
+
     data = r.json()
 
     df = pd.DataFrame(data, columns=[
-        "open_time",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "quote_asset_volume",
-        "num_trades",
-        "taker_buy_base",
-        "taker_buy_quote",
-        "ignore"
+        "open_time","open","high","low","close","volume",
+        "close_time","qav","trades","tbbav","tbqav","ignore"
     ])
 
-    # convert numeric columns properly
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = df[col].astype(float)
+    for c in ["open","high","low","close","volume"]:
+        df[c] = df[c].astype(float)
 
     return df
 
-# =========================
-# STRATEGY SELECTOR (NO REGIME ENGINE)
-# =========================
-def select_strategy(df):
-    ma20 = df["close"].rolling(20).mean()
-    slope = ma20.diff().iloc[-1]
-    vol = df["close"].rolling(20).std().iloc[-1]
-    price = df["close"].iloc[-1]
 
-    vol_ratio = vol / price
-
-    # TREND
-    if abs(slope) > vol * 0.15:
-        return "trend_strength_crossover"
-
-    # BREAKOUT
-    if vol_ratio > 0.01:
-        return "breakout"
-
-    # MOMENTUM
-    if slope > 0 and vol_ratio < 0.006:
-        return "momentum"
-
-    # DEFAULT
-    return "mean_reversion"
-
-
-# =========================
-# SIGNAL ENGINE (REGISTRY)
-# =========================
-def get_signal(df, strategy_name):
-
-    if strategy_name == "mean_reversion":
-        from strategies import mean_reversion
-        df = mean_reversion.calculate_indicators(df)
-        return mean_reversion.check_signal(df)
-
-    if strategy_name == "breakout":
-        from strategies import breakout
-        df = breakout.calculate_indicators(df)
-        return breakout.check_signal(df)
-
-    if strategy_name == "momentum":
-        from strategies import momentum
-        df = momentum.calculate_indicators(df)
-        return momentum.check_signal(df)
-
-    if strategy_name == "kst":
-        from strategies import kst
-        df = kst.calculate_indicators(df)
-        return kst.check_signal(df)
-
-    if strategy_name == "trend_strength_crossover":
-        from strategies import trend_strength_crossover
-        df = trend_strength_crossover.calculate_indicators(df)
-        return trend_strength_crossover.check_signal(df)
-
-    return None
-
-# =========================
-# MAIN LOOP
-# =========================
 def run():
-    print("🚀 STRATEGY REGISTRY ENGINE STARTED")
-    send_telegram("🚀 STRATEGY REGISTRY ENGINE STARTED")
+    print("🚀 OPTION B ENGINE STARTED")
 
-    initialize_pairs(PAIRS)
+    init(SYMBOLS)
 
     while True:
+        for symbol in SYMBOLS:
 
-        for symbol in PAIRS:
+            df = get_klines(symbol)
 
-            try:
-                df = get_klines(symbol)
+            # -------------------------
+            # SIMPLE STRATEGY PICK
+            # -------------------------
+            strategy = "mean_reversion"
+            strat = get_strategy(strategy)
 
-                strategy = select_strategy(df)
-                signal = get_signal(df, strategy)
+            df = strat.calculate_indicators(df)
+            signal = strat.check_signal(df)
 
-                price = df["close"].iloc[-1]
+            price = df["close"].iloc[-1]
 
-                print(f"[{symbol}] Strategy={strategy} Signal={signal} Price={price}")
+            print(f"{symbol} | {strategy} | {signal}")
 
-                if signal:
-                    msg = f"{symbol} | {strategy.upper()} | {signal} @ {price}"
-                    send_telegram(msg)
-
-                    handle_trade(symbol, signal, price, strategy)
-
-            except Exception as e:
-                print(f"Error {symbol}: {e}")
+            if signal:
+                execute(symbol, signal, price)
 
         print("Cycle complete...\n")
-        time.sleep(SLEEP)
+        time.sleep(60)
 
 
 if __name__ == "__main__":
