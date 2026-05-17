@@ -25,6 +25,15 @@ def build_indicators(df):
     )
 
     # =========================
+    # MA20 STD
+    # =========================
+    df["ma20_std"] = (
+        df["ma20"]
+        .rolling(20)
+        .std()
+    )
+
+    # =========================
     # TREND
     # =========================
     df["trend_strength"] = (
@@ -64,14 +73,14 @@ def build_indicators(df):
     )
 
     # =========================
-    # CANDLE RANGE
+    # RANGE
     # =========================
     df["range"] = (
         df["high"] - df["low"]
     )
 
     # =========================
-    # ATR STYLE RANGE
+    # RANGE MA
     # =========================
     df["range_ma"] = (
         df["range"]
@@ -83,7 +92,8 @@ def build_indicators(df):
     # MOMENTUM
     # =========================
     df["momentum"] = (
-        df["close"] - df["close"].shift(5)
+        df["close"]
+        - df["close"].shift(5)
     )
 
     return df
