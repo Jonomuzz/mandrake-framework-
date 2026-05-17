@@ -1,4 +1,4 @@
-print("🔥 LOADED DATA.PY FROM CORRECT FILE")
+print("🔥🔥🔥 THIS IS CORE/DATA.PY V3 ACTIVE 🔥🔥🔥")
 import requests
 import pandas as pd
 
