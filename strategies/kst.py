@@ -1,75 +1,42 @@
-import pandas as pd
-
-
-def roc(series, period):
-    return ((series - series.shift(period)) / series.shift(period)) * 100
-
-
 def calculate_indicators(df):
+    # Rate of change components
+    r1 = df["close"].pct_change(10)
+    r2 = df["close"].pct_change(15)
+    r3 = df["close"].pct_change(20)
+    r4 = df["close"].pct_change(30)
 
-    # =========================
-    # 200 EMA TREND FILTER
-    # =========================
-    df["ema200"] = df["close"].ewm(span=200).mean()
-
-    # =========================
-    # KST COMPONENTS
-    # =========================
-    rcma1 = roc(df["close"], 10).rolling(10).mean()
-    rcma2 = roc(df["close"], 15).rolling(15).mean()
-    rcma3 = roc(df["close"], 20).rolling(20).mean()
-    rcma4 = roc(df["close"], 30).rolling(30).mean()
-
-    # =========================
-    # KST LINE
-    # =========================
+    # smoothed KST line
     df["kst"] = (
-        rcma1 * 1 +
-        rcma2 * 2 +
-        rcma3 * 3 +
-        rcma4 * 4
+        r1.rolling(10).mean() * 1 +
+        r2.rolling(10).mean() * 2 +
+        r3.rolling(10).mean() * 3 +
+        r4.rolling(15).mean() * 4
     )
 
-    # =========================
-    # SIGNAL LINE
-    # =========================
-    df["signal"] = df["kst"].rolling(20).mean()
+    df["kst_signal"] = df["kst"].rolling(5).mean()
 
     return df
 
 
 def check_signal(df):
+    kst = df["kst"].iloc[-1]
+    signal = df["kst_signal"].iloc[-1]
 
-    if len(df) < 250:
+    if pd.isna(kst) or pd.isna(signal):
         return None
 
-    prev = df.iloc[-2]
-    curr = df.iloc[-1]
+    # crossover logic
+    prev_kst = df["kst"].iloc[-2]
+    prev_signal = df["kst_signal"].iloc[-2]
 
-    # =========================
-    # BUY CONDITIONS
-    # =========================
-    bullish_trend = curr["close"] > curr["ema200"]
-
-    bullish_cross = (
-        prev["kst"] < prev["signal"] and
-        curr["kst"] > curr["signal"]
-    )
-
-    if bullish_trend and bullish_cross:
+    if prev_kst < prev_signal and kst > signal:
         return "BUY"
 
-    # =========================
-    # SELL CONDITIONS
-    # =========================
-    bearish_trend = curr["close"] < curr["ema200"]
-
-    bearish_cross = (
-        prev["kst"] > prev["signal"] and
-        curr["kst"] < curr["signal"]
-    )
-
-    if bearish_trend and bearish_cross:
+    if prev_kst > prev_signal and kst < signal:
         return "SELL"
 
     return None
+
+
+def get_signal(df):
+    return check_signal(calculate_indicators(df))
