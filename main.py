@@ -11,7 +11,7 @@ from strategies import (
 )
 
 from core.notifications import send_telegram
-from core.execution_engine import process_trade
+from core.execution import process_trade
 from core.config import (
     PAIRS,
     INTERVAL,
