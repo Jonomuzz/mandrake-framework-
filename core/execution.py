@@ -1,36 +1,107 @@
-from core.position_manager import is_open, open_position, close_position
-from core.portfolio import update_balance
-from core.telegram import send_telegram
+from core.position_manager import (
+    has_position,
+    open_position,
+    close_position,
+    get_position
+)
+
+from core.notifications import send_telegram
+from core.accounting import record_trade
 
 
-entry_prices = {}
+TAKE_PROFIT = 2.0
+STOP_LOSS = -1.0
 
 
-def execute(symbol, signal, price, size_pct=0.10):
-    # -------------------------
-    # OPEN TRADE
-    # -------------------------
-    if signal == "BUY" and not is_open(symbol):
-        open_position(symbol)
-        entry_prices[symbol] = price
+def process_trade(
+    symbol,
+    strategy,
+    signal,
+    price
+):
 
-        send_telegram(f"🟢 OPEN BUY {symbol} @ {price}")
+    # =========================
+    # OPEN POSITION
+    # =========================
+    if signal == "BUY":
+
+        if not has_position(symbol):
+
+            open_position(
+                symbol,
+                "LONG",
+                price,
+                strategy
+            )
+
+            send_telegram(
+                f"🟢 OPEN LONG {symbol}\n"
+                f"Strategy: {strategy}\n"
+                f"Entry: {price}"
+            )
+
         return
 
-    # -------------------------
-    # CLOSE TRADE
-    # -------------------------
-    if signal == "SELL" and is_open(symbol):
-        entry = entry_prices[symbol]
-        pnl_pct = ((price - entry) / entry) * 100
+    # =========================
+    # MANAGE POSITION
+    # =========================
+    if has_position(symbol):
 
-        trade_size = 500 * size_pct
-        pnl_usd = trade_size * (pnl_pct / 100)
+        position = get_position(symbol)
 
-        update_balance(symbol, pnl_usd)
-        close_position(symbol)
+        entry = position["entry_price"]
 
-        send_telegram(
-            f"🔴 CLOSE {symbol} @ {price}\n"
-            f"PnL: {pnl_pct:.2f}% | ${pnl_usd:.2f}"
-        )
+        pnl_pct = (
+            (price - entry) / entry
+        ) * 100
+
+        # =========================
+        # TAKE PROFIT
+        # =========================
+        if pnl_pct >= TAKE_PROFIT:
+
+            send_telegram(
+                f"🏆 TAKE PROFIT HIT\n"
+                f"{symbol}\n"
+                f"PnL: {round(pnl_pct, 2)}%"
+            )
+
+            record_trade(pnl_pct)
+
+            close_position(symbol)
+
+            return
+
+        # =========================
+        # STOP LOSS
+        # =========================
+        if pnl_pct <= STOP_LOSS:
+
+            send_telegram(
+                f"🛑 STOP LOSS HIT\n"
+                f"{symbol}\n"
+                f"PnL: {round(pnl_pct, 2)}%"
+            )
+
+            record_trade(pnl_pct)
+
+            close_position(symbol)
+
+            return
+
+        # =========================
+        # SELL SIGNAL EXIT
+        # =========================
+        if signal == "SELL":
+
+            send_telegram(
+                f"🔴 CLOSE POSITION\n"
+                f"{symbol}\n"
+                f"PnL: {round(pnl_pct, 2)}%"
+            )
+
+            record_trade(pnl_pct)
+
+            close_position(symbol)
+
+            return
