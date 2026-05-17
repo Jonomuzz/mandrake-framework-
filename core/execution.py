@@ -1,109 +1,82 @@
-from core.position_manager import (
-    has_position,
-    open_position,
-    close_position,
-    get_position
-)
-
+import time
 from core.notifications import send_telegram
-from core.accounting import record_trade
+from core.portfolio import update_portfolio
+
+# =========================
+# EXECUTION ENGINE V3
+# =========================
+
+OPEN_POSITIONS = {}  # in-memory position tracking
 
 
-TAKE_PROFIT = 2.0
-STOP_LOSS = -1.0
+def open_position(symbol, side, price, portfolio):
+    """
+    Opens a simulated position
+    """
+
+    if symbol in OPEN_POSITIONS:
+        return None  # already in trade
+
+    position = {
+        "symbol": symbol,
+        "side": side,
+        "entry": price,
+        "time": time.time()
+    }
+
+    OPEN_POSITIONS[symbol] = position
+
+    send_telegram(f"🟢 OPEN {side} {symbol} @ {price}")
+    return position
 
 
-def process_trade(
-    symbol,
-    strategy,
-    signal,
-    price
-):
+def close_position(symbol, price, portfolio):
+    """
+    Closes position and calculates PnL
+    """
 
-    # =========================
-    # OPEN POSITION
-    # =========================
-    if signal == "BUY":
+    if symbol not in OPEN_POSITIONS:
+        return None
 
-        if not has_position(symbol):
+    position = OPEN_POSITIONS.pop(symbol)
 
-            open_position(
-                symbol,
-                "LONG",
-                price,
-                strategy
-            )
+    entry = position["entry"]
 
-            send_telegram(
-                f"🟢 OPEN LONG {symbol}\n"
-                f"Strategy: {strategy}\n"
-                f"Entry: {price}"
-            )
+    # PnL %
+    if position["side"] == "BUY":
+        pnl_pct = ((price - entry) / entry) * 100
+    else:
+        pnl_pct = ((entry - price) / entry) * 100
 
+    update_portfolio(portfolio, symbol, pnl_pct)
+
+    send_telegram(
+        f"🔴 CLOSE {symbol}\n"
+        f"Entry: {entry}\n"
+        f"Exit: {price}\n"
+        f"PnL: {round(pnl_pct, 2)}%"
+    )
+
+    return pnl_pct
+
+
+def process_trade(symbol, signal, price, portfolio):
+    """
+    Main execution handler
+    """
+
+    # NO SIGNAL
+    if signal is None:
         return
 
-    # =========================
-    # MANAGE POSITION
-    # =========================
-    if has_position(symbol):
+    # OPEN LONG
+    if signal == "BUY":
+        return open_position(symbol, "BUY", price, portfolio)
 
-        position = get_position(symbol)
+    # OPEN SHORT / EXIT LONG
+    if signal == "SELL":
+        # if position exists → close
+        if symbol in OPEN_POSITIONS:
+            return close_position(symbol, price, portfolio)
 
-        entry = position["entry_price"]
-
-        pnl_pct = (
-            (price - entry) / entry
-        ) * 100
-
-        # =========================
-        # TAKE PROFIT
-        # =========================
-        if pnl_pct >= TAKE_PROFIT:
-
-            send_telegram(
-                f"🏆 TAKE PROFIT HIT\n"
-                f"{symbol}\n"
-                f"PnL: {round(pnl_pct, 2)}%"
-            )
-
-            from core.portfolio import update_portfolio
-
-            update_portfolio(portfolio, symbol, pnl_pct)
-
-            close_position(symbol)
-
-            return
-
-        # =========================
-        # STOP LOSS
-        # =========================
-        if pnl_pct <= STOP_LOSS:
-
-            send_telegram(
-                f"🛑 STOP LOSS HIT\n"
-                f"{symbol}\n"
-                f"PnL: {round(pnl_pct, 2)}%"
-            )
-
-            record_trade(pnl_pct)
-
-            close_position(symbol)
-
-            return
-
-        # =========================
-        # SELL SIGNAL EXIT
-        # =========================
-        if signal == "SELL":
-
-            send_telegram(
-                f"🔴 CLOSE POSITION\n"
-                f"{symbol}\n"
-                f"PnL: {round(pnl_pct, 2)}%"
-            )
-
-            record_trade(pnl_pct)
-
-            close_position(symbol)
-
-            return
+    return None
