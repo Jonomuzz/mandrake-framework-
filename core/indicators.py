@@ -34,10 +34,19 @@ def build_indicators(df):
     )
 
     # =========================
-    # TREND
+    # MA20 SLOPE
+    # =========================
+    df["ma20_slope"] = (
+        df["ma20"]
+        .diff()
+    )
+
+    # =========================
+    # TREND STRENGTH
     # =========================
     df["trend_strength"] = (
-        df["ma20"].diff()
+        df["ma20"]
+        .diff()
     )
 
     # =========================
@@ -77,6 +86,15 @@ def build_indicators(df):
     # =========================
     df["range"] = (
         df["high"] - df["low"]
+    )
+
+    # =========================
+    # AVERAGE RANGE
+    # =========================
+    df["avg_range"] = (
+        df["range"]
+        .rolling(14)
+        .mean()
     )
 
     # =========================
