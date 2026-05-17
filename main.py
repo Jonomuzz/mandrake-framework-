@@ -33,9 +33,36 @@ def get_klines(symbol):
     r = requests.get(BASE_URL, params=params)
     data = r.json()
 
-    df = pd.DataFrame(data)
-    df["close"] = df[4].astype(float)
-    return df
+    df = pd.DataFrame(data, columns=[
+    "time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "close_time",
+    "qav",
+    "num_trades",
+    "taker_base_vol",
+    "taker_quote_vol",
+    "ignore"
+])
+
+# =========================
+# TYPE CONVERSION
+# =========================
+numeric_cols = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume"
+]
+
+for col in numeric_cols:
+    df[col] = df[col].astype(float)
+
+return df
 
 
 # =========================
