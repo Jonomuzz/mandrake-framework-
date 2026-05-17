@@ -1,17 +1,14 @@
 import os
 import time
-import pandas as pd
 
 from core.data import get_klines
 from core.notifications import send_telegram
-from core.execution import process_trade
-from core.portfolio import init_portfolio, format_summary
 
-# strategies
-from strategies.mean_reversion import get_signal as mean_reversion_signal
-from strategies.trend_strength_crossover import get_signal as trend_signal
-from strategies.momentum import get_signal as momentum_signal
-from strategies.breakout import get_signal as breakout_signal
+from strategies.mean_reversion import get_signal as mean_reversion
+from strategies.trend_strength_crossover import get_signal as trend
+from strategies.momentum import get_signal as momentum
+from strategies.breakout import get_signal as breakout
+from strategies.kst import get_signal as kst
 
 
 # =========================
@@ -26,69 +23,93 @@ SYMBOLS = [
 
 INTERVAL = "1m"
 LIMIT = 100
-
 SLEEP = 60
 
+STRATEGY_MAP = {
+    "mean_reversion": mean_reversion,
+    "trend": trend,
+    "momentum": momentum,
+    "breakout": breakout,
+    "kst": kst
+}
+
+# simple overtrade protection (cooldown per symbol)
+cooldown = {}
+COOLDOWN_CYCLES = 3
+
 
 # =========================
-# PORTFOLIO INIT
+# STRATEGY SELECTOR
 # =========================
 
-portfolio = init_portfolio(SYMBOLS)
-
-
-# =========================
-# STRATEGY ROUTER
-# =========================
-
-def get_strategy_signal(df, symbol):
-
-    # simple regime logic (stable version)
-    if df["close"].iloc[-1] > df["close"].rolling(20).mean().iloc[-1]:
-        return trend_signal(df)
-    elif df["close"].pct_change().std() > 0.01:
-        return momentum_signal(df)
-    elif df["close"].pct_change().abs().mean() < 0.002:
-        return mean_reversion_signal(df)
+def select_strategy(symbol):
+    """
+    Simple deterministic routing (can be upgraded later)
+    """
+    if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
+        return "trend"
+    elif symbol in ["SOLUSDT", "AVAXUSDT", "LTCUSDT"]:
+        return "momentum"
+    elif symbol in ["DOGEUSDT", "XRPUSDT"]:
+        return "breakout"
     else:
-        return breakout_signal(df)
+        return "mean_reversion"
 
 
 # =========================
-# RUN LOOP
+# COOLDOWN FILTER
+# =========================
+
+def can_trade(symbol):
+    return cooldown.get(symbol, 0) == 0
+
+
+def apply_cooldown(symbol):
+    cooldown[symbol] = COOLDOWN_CYCLES
+
+
+def reduce_cooldowns():
+    for k in list(cooldown.keys()):
+        cooldown[k] -= 1
+        if cooldown[k] <= 0:
+            del cooldown[k]
+
+
+# =========================
+# MAIN LOOP
 # =========================
 
 def run():
+    print("🚀 FULL EXECUTION ENGINE STARTED")
 
     send_telegram("🚀 FULL EXECUTION ENGINE STARTED")
 
     while True:
-
         for symbol in SYMBOLS:
 
             try:
                 df = get_klines(symbol, INTERVAL, LIMIT)
 
-                if df is None or len(df) < 30:
-                    continue
+                strategy_name = select_strategy(symbol)
+                strategy = STRATEGY_MAP[strategy_name]
 
-                price = float(df["close"].iloc[-1])
+                signal = strategy(df)
 
-                signal = get_strategy_signal(df, symbol)
+                print(f"{symbol} | {strategy_name} | {signal}")
 
-                print(f"{symbol} | {signal}")
+                # only act on real signals
+                if signal and can_trade(symbol):
 
-                # EXECUTION
-                process_trade(symbol, signal, price, portfolio)
+                    msg = f"{symbol} | {strategy_name.upper()} | {signal}"
+                    send_telegram(msg)
 
-                # OPTIONAL: periodic summary
-                if signal in ["BUY", "SELL"]:
-                    send_telegram(format_summary(portfolio, symbol))
+                    apply_cooldown(symbol)
 
             except Exception as e:
                 print(f"Error {symbol}: {e}")
 
-        print("Cycle complete...")
+        reduce_cooldowns()
+        print("Cycle complete...\n")
         time.sleep(SLEEP)
 
 
