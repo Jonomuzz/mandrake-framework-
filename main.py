@@ -2,7 +2,6 @@ import time
 import os
 import requests
 import pandas as pd
-from collections import defaultdict
 
 from strategies import (
     mean_reversion,
@@ -12,20 +11,51 @@ from strategies import (
     kst
 )
 
-# ================= CORE SYSTEM =================
-from core.accounting import log_trade
-from core.strategy_guard import evaluate_strategies, is_disabled
-from core.correlation import register_position, remove_position, is_correlated_block
+# ================= CORE =================
+from core.indicators import build_indicators
+from core.trade_filter import (
+    is_high_quality_setup,
+    register_trade
+)
 
-from core.exits import should_exit
+from core.accounting import (
+    log_trade,
+    load_trades
+)
+
+from core.capital_allocator import (
+    rebalance_capital,
+    get_allocation,
+    get_allocation_report
+)
+
+from core.correlation import (
+    register_position,
+    remove_position,
+    is_correlated_block
+)
+
+from core.strategy_guard import (
+    evaluate_strategies,
+    is_disabled
+)
+
 from core.dashboard import generate_dashboard
-from core.capital_allocator import rebalance_capital, get_allocation, get_allocation_report
 
 # ================= CONFIG =================
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
-    "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "MATICUSDT",
+    "LTCUSDT",
+    "ATOMUSDT"
 ]
 
 INTERVAL = "1m"
@@ -34,54 +64,93 @@ SLEEP = 60
 
 START_BALANCE = 500
 
+BASE_URL = "https://api.binance.com/api/v3/klines"
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("ALERT_CHAT_ID")
-
-BASE_URL = "https://api.binance.com/api/v3/klines"
 
 # ================= STATE =================
 positions = {}
 entry_price = {}
+entry_strategy = {}
 position_size = {}
 entry_time = {}
-last_report = time.time()
+
+last_dashboard = time.time()
 
 # ================= TELEGRAM =================
-def send_telegram(msg):
+def send_telegram(message):
+
     if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("Telegram not configured")
         return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
+
+    try:
+        requests.post(url, data=payload)
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
 # ================= DATA =================
 def get_klines(symbol):
-    params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
-    r = requests.get(BASE_URL, params=params)
-    data = r.json()
+
+    params = {
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": LIMIT
+    }
+
+    response = requests.get(BASE_URL, params=params)
+    data = response.json()
 
     df = pd.DataFrame(data)
+
+    df["open"] = df[1].astype(float)
+    df["high"] = df[2].astype(float)
+    df["low"] = df[3].astype(float)
     df["close"] = df[4].astype(float)
     df["volume"] = df[5].astype(float)
+
     return df
 
-# ================= REGIME =================
+# ================= REGIME ENGINE =================
 def select_strategy(df):
 
-    ma20 = df["close"].rolling(20).mean()
-    slope = ma20.diff().iloc[-1]
-    vol = df["close"].rolling(20).std().iloc[-1]
-    price = df["close"].iloc[-1]
+    curr = df.iloc[-1]
 
-    vol_ratio = vol / price
+    volatility = curr.get("volatility", 0)
+    trend_strength = abs(curr.get("trend_strength", 0))
+    zscore = abs(curr.get("zscore", 0))
 
-    if abs(slope) > vol * 0.15:
+    # =========================
+    # STRONG TREND
+    # =========================
+    if trend_strength > 0.0015:
         return "trend"
 
-    if vol_ratio > 0.01:
+    # =========================
+    # BREAKOUT
+    # =========================
+    if volatility > df["volatility"].mean() * 1.5:
         return "breakout"
 
-    if slope > 0 and vol_ratio < 0.006:
+    # =========================
+    # MOMENTUM
+    # =========================
+    if trend_strength > 0.0008:
         return "momentum"
+
+    # =========================
+    # MEAN REVERSION
+    # =========================
+    if zscore > 1:
+        return "mean_reversion"
 
     return "mean_reversion"
 
@@ -89,7 +158,6 @@ def select_strategy(df):
 def get_signal(df, strategy):
 
     if strategy == "trend":
-        df = trend_strength_crossover.calculate_indicators(df)
         return trend_strength_crossover.check_signal(df)
 
     if strategy == "mean_reversion":
@@ -111,101 +179,180 @@ def execute_trade(symbol, signal, price, strategy):
 
     global positions
 
-    now = time.time()
-
-    # ================= ENTRY =================
+    # =========================
+    # BUY
+    # =========================
     if signal == "BUY" and positions.get(symbol) is None:
 
+        # Correlation protection
+        if is_correlated_block(symbol):
+            return
+
         allocation = get_allocation(strategy)
+
         size = START_BALANCE * allocation
 
         positions[symbol] = "LONG"
         entry_price[symbol] = price
+        entry_strategy[symbol] = strategy
         position_size[symbol] = size
-        entry_time[symbol] = now
+        entry_time[symbol] = time.time()
 
         register_position(symbol, strategy)
+        register_trade(symbol)
 
-        msg = f"🟢 BUY {symbol} | {strategy} | size=${round(size,2)} @ {price}"
-        send_telegram(msg)
-
-    # ================= EXIT =================
-    elif positions.get(symbol) == "LONG":
-
-        exit_reason = should_exit(
-            symbol,
-            entry_price[symbol],
-            price,
-            entry_time[symbol],
-            regime_flip=False
+        msg = (
+            f"🟢 BUY {symbol}\n"
+            f"Strategy: {strategy}\n"
+            f"Price: {price}\n"
+            f"Size: ${round(size, 2)}"
         )
 
-        if signal == "SELL" or exit_reason is not None:
+        print(msg)
+        send_telegram(msg)
 
-            entry = entry_price[symbol]
-            size = position_size[symbol]
+    # =========================
+    # SELL
+    # =========================
+    elif signal == "SELL" and positions.get(symbol) == "LONG":
 
-            pnl_pct = ((price - entry) / entry) * 100
-            pnl_usd = size * (pnl_pct / 100)
+        entry = entry_price[symbol]
+        size = position_size[symbol]
 
-            log_trade(symbol, strategy, "LONG", entry, price, size, pnl_usd)
-            remove_position(symbol)
+        pnl_pct = ((price - entry) / entry) * 100
+        pnl_usd = size * (pnl_pct / 100)
 
-            positions[symbol] = None
-            entry_price[symbol] = 0
-            position_size[symbol] = 0
+        strategy = entry_strategy[symbol]
 
-            msg = (
-                f"🔴 SELL {symbol} | {strategy}\n"
-                f"PnL: {round(pnl_pct,2)}% | ${round(pnl_usd,2)}\n"
-                f"Exit: {exit_reason if exit_reason else 'signal'}"
-            )
+        log_trade(
+            symbol=symbol,
+            strategy=strategy,
+            side="LONG",
+            entry_price=entry,
+            exit_price=price,
+            size=size,
+            pnl=pnl_usd
+        )
 
-            send_telegram(msg)
+        remove_position(symbol)
+
+        msg = (
+            f"🔴 SELL {symbol}\n"
+            f"Strategy: {strategy}\n"
+            f"PnL: {round(pnl_pct, 2)}%\n"
+            f"Profit: ${round(pnl_usd, 2)}"
+        )
+
+        print(msg)
+        send_telegram(msg)
+
+        positions[symbol] = None
+        entry_price[symbol] = 0
+        entry_strategy[symbol] = None
+        position_size[symbol] = 0
 
 # ================= MAIN LOOP =================
 def run():
 
-    print("🚀 FULL CAPITAL ALLOCATOR v2 ENGINE STARTED")
-    send_telegram("🚀 FULL CAPITAL ALLOCATOR v2 ENGINE STARTED")
+    global last_dashboard
+
+    print("🚀 OVERTRADING FILTER ENGINE STARTED")
+
+    send_telegram(
+        "🚀 OVERTRADING FILTER ENGINE STARTED"
+    )
 
     while True:
 
-        evaluate_strategies()
-        rebalance_capital()
+        try:
 
-        for symbol in SYMBOLS:
+            # =========================
+            # UPDATE CAPITAL ALLOCATION
+            # =========================
+            rebalance_capital()
 
-            try:
-                df = get_klines(symbol)
+            # =========================
+            # CHECK STRATEGY HEALTH
+            # =========================
+            evaluate_strategies()
 
-                strategy = select_strategy(df)
+            # =========================
+            # LOOP SYMBOLS
+            # =========================
+            for symbol in SYMBOLS:
 
-                if is_disabled(strategy):
-                    continue
+                try:
 
-                signal = get_signal(df, strategy)
-                price = df["close"].iloc[-1]
+                    df = get_klines(symbol)
 
-                if signal:
-                    execute_trade(symbol, signal, price, strategy)
+                    # Build ALL indicators
+                    df = build_indicators(df)
 
-            except Exception as e:
-                print(f"Error {symbol}: {e}")
+                    strategy = select_strategy(df)
 
-        # ================= REPORTS =================
-        global last_report
+                    # Skip disabled strategies
+                    if is_disabled(strategy):
+                        continue
 
-        if time.time() - last_report > 900:
+                    signal = get_signal(df, strategy)
 
-            send_telegram(generate_dashboard())
-            send_telegram(get_allocation_report())
+                    price = df.iloc[-1]["close"]
 
-            last_report = time.time()
+                    print(
+                        f"{symbol} | "
+                        f"{strategy} | "
+                        f"{signal}"
+                    )
 
-        print("Cycle complete...\n")
-        time.sleep(SLEEP)
+                    # =========================
+                    # QUALITY FILTER
+                    # =========================
+                    if signal:
 
+                        high_quality = is_high_quality_setup(
+                            df,
+                            strategy,
+                            symbol
+                        )
 
+                        if not high_quality:
+                            continue
+
+                        execute_trade(
+                            symbol,
+                            signal,
+                            price,
+                            strategy
+                        )
+
+                except Exception as e:
+                    print(f"Error {symbol}: {e}")
+
+            # =========================
+            # DASHBOARD
+            # =========================
+            elapsed = time.time() - last_dashboard
+
+            if elapsed > 1800:
+
+                send_telegram(
+                    generate_dashboard()
+                )
+
+                send_telegram(
+                    get_allocation_report()
+                )
+
+                last_dashboard = time.time()
+
+            print("Cycle complete...\n")
+
+            time.sleep(SLEEP)
+
+        except Exception as e:
+            print(f"Main loop error: {e}")
+            time.sleep(30)
+
+# ================= START =================
 if __name__ == "__main__":
     run()
