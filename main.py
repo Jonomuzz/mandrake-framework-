@@ -185,7 +185,7 @@ def execute_trade(symbol, signal, price, strategy):
     if signal == "BUY" and positions.get(symbol) is None:
 
         # Correlation protection
-        if is_correlated_block(symbol):
+        if is_correlated_block(symbol, strategy):
             return
 
         allocation = get_allocation(strategy)
