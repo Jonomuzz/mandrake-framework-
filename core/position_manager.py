@@ -1,18 +1,24 @@
 positions = {}
 
 
-def init(symbols):
-    for s in symbols:
-        positions[s] = None
+def has_position(symbol):
+    return symbol in positions
 
 
-def open_position(symbol):
-    positions[symbol] = "LONG"
+def open_position(symbol, side, price, strategy):
+
+    positions[symbol] = {
+        "side": side,
+        "entry_price": price,
+        "strategy": strategy
+    }
 
 
 def close_position(symbol):
-    positions[symbol] = None
+
+    if symbol in positions:
+        del positions[symbol]
 
 
-def is_open(symbol):
-    return positions[symbol] is not None
+def get_position(symbol):
+    return positions.get(symbol)
