@@ -1,33 +1,21 @@
-
 def calculate_indicators(df):
-    df["high_20"] = df["high"].astype(float).rolling(window=20).max()
-    df["low_20"] = df["low"].astype(float).rolling(window=20).min()
-
-    df["range"] = df["high_20"] - df["low_20"]
-    df["avg_range"] = df["range"].rolling(window=10).mean()
-
+    df["high20"] = df["high"].rolling(20).max()
+    df["low20"] = df["low"].rolling(20).min()
     return df
 
 
-
 def check_signal(df):
-    if len(df) < 30:
-        return None
+    close = df["close"].iloc[-1]
 
-    prev = df.iloc[-2]
-    curr = df.iloc[-1]
-
-    breakout_strength = curr["range"] > curr["avg_range"]
-
-    # BUY BREAKOUT
-    if (
-        curr["close"] > prev["high_20"] and
-        breakout_strength
-    ):
+    if close > df["high20"].iloc[-2]:
         return "BUY"
 
-    # SELL BREAKDOWN
-    if curr["close"] < prev["low_20"]:
+    if close < df["low20"].iloc[-2]:
         return "SELL"
 
     return None
+
+
+def get_signal(df):
+    df = calculate_indicators(df)
+    return check_signal(df)
