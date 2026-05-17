@@ -1,23 +1,29 @@
 import requests
-import os
+from core.config import TELEGRAM_TOKEN, ALERT_CHAT_ID
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
 def send_telegram(message):
     print("📨 Attempting Telegram send:", message)
 
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("❌ Missing TELEGRAM_TOKEN or CHAT_ID")
+    # Debug visibility (helps you avoid silent failures)
+    print("🔍 TOKEN LOADED:", bool(TELEGRAM_TOKEN))
+    print("🔍 CHAT ID LOADED:", bool(ALERT_CHAT_ID))
+
+    if not TELEGRAM_TOKEN or not ALERT_CHAT_ID:
+        print("❌ Missing TELEGRAM_TOKEN or ALERT_CHAT_ID")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     try:
-        r = requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": message
-        }, timeout=10)
+        r = requests.post(
+            url,
+            data={
+                "chat_id": ALERT_CHAT_ID,
+                "text": message
+            },
+            timeout=10
+        )
 
         print("📨 Telegram response:", r.status_code, r.text)
 
