@@ -1,33 +1,36 @@
-import json
-import os
-from datetime import datetime
-
-FILE = "storage/trade_ledger.json"
-
-if not os.path.exists(FILE):
-    with open(FILE, "w") as f:
-        json.dump([], f)
+trade_stats = {
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "profit": 0
+}
 
 
-def log_trade(symbol, strategy, side, entry, exit_price, size, pnl):
-    with open(FILE, "r") as f:
-        data = json.load(f)
+def record_trade(pnl_pct):
 
-    data.append({
-        "time": str(datetime.utcnow()),
-        "symbol": symbol,
-        "strategy": strategy,
-        "side": side,
-        "entry": entry,
-        "exit": exit_price,
-        "size": size,
-        "pnl": pnl
-    })
+    trade_stats["total_trades"] += 1
 
-    with open(FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    trade_stats["profit"] += pnl_pct
+
+    if pnl_pct > 0:
+        trade_stats["wins"] += 1
+    else:
+        trade_stats["losses"] += 1
 
 
-def load_trades():
-    with open(FILE, "r") as f:
-        return json.load(f)
+def get_summary():
+
+    total = trade_stats["total_trades"]
+
+    win_rate = 0
+
+    if total > 0:
+        win_rate = (
+            trade_stats["wins"] / total
+        ) * 100
+
+    return {
+        "trades": total,
+        "win_rate": round(win_rate, 2),
+        "profit": round(trade_stats["profit"], 2)
+    }
