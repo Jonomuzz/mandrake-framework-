@@ -1,239 +1,94 @@
+import os
 import time
-import requests
 import pandas as pd
 
-from strategies import (
-    mean_reversion,
-    trend_strength_crossover,
-    breakout,
-    momentum,
-    kst
-)
-
+from core.data import get_klines
 from core.notifications import send_telegram
 from core.execution import process_trade
-from core.config import (
-    PAIRS,
-    INTERVAL,
-    LIMIT,
-    SLEEP
-)
+from core.portfolio import init_portfolio, format_summary
 
-BASE_URL = "https://api.binance.com/api/v3/klines"
-
-
-# =========================
-# DATA
-# =========================
-def get_klines(symbol):
-
-    params = {
-        "symbol": symbol,
-        "interval": INTERVAL,
-        "limit": LIMIT
-    }
-
-    response = requests.get(
-        BASE_URL,
-        params=params
-    )
-
-    data = response.json()
-
-    df = pd.DataFrame(data, columns=[
-        "time",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "qav",
-        "num_trades",
-        "taker_base_vol",
-        "taker_quote_vol",
-        "ignore"
-    ])
-
-    for col in [
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume"
-    ]:
-        df[col] = df[col].astype(float)
-
-    return df
+# strategies
+from strategies.mean_reversion import get_signal as mean_reversion_signal
+from strategies.trend_strength_crossover import get_signal as trend_signal
+from strategies.momentum import get_signal as momentum_signal
+from strategies.breakout import get_signal as breakout_signal
 
 
 # =========================
-# REGIME DETECTOR
+# CONFIG
 # =========================
-def select_strategy(df):
 
-    ma20 = (
-        df["close"]
-        .rolling(20)
-        .mean()
-    )
+SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT",
+    "LINKUSDT", "MATICUSDT", "LTCUSDT", "ATOMUSDT"
+]
 
-    slope = ma20.diff().iloc[-1]
+INTERVAL = "1m"
+LIMIT = 100
 
-    vol = (
-        df["close"]
-        .rolling(20)
-        .std()
-        .iloc[-1]
-    )
-
-    price = df["close"].iloc[-1]
-
-    vol_ratio = vol / price
-
-    if abs(slope) > vol * 0.15:
-        return "trend"
-
-    if vol_ratio > 0.01:
-        return "breakout"
-
-    if slope > 0 and vol_ratio < 0.006:
-        return "momentum"
-
-    return "mean_reversion"
+SLEEP = 60
 
 
 # =========================
-# ROUTER
+# PORTFOLIO INIT
 # =========================
-def get_signal(df, strategy):
 
-    try:
-
-        if strategy == "trend":
-            df = (
-                trend_strength_crossover
-                .calculate_indicators(df)
-            )
-
-            return (
-                trend_strength_crossover
-                .check_signal(df)
-            )
-
-        if strategy == "mean_reversion":
-            df = (
-                mean_reversion
-                .calculate_indicators(df)
-            )
-
-            return (
-                mean_reversion
-                .check_signal(df)
-            )
-
-        if strategy == "breakout":
-            df = (
-                breakout
-                .calculate_indicators(df)
-            )
-
-            return (
-                breakout
-                .check_signal(df)
-            )
-
-        if strategy == "momentum":
-            df = (
-                momentum
-                .calculate_indicators(df)
-            )
-
-            return (
-                momentum
-                .check_signal(df)
-            )
-
-        if strategy == "kst":
-            df = (
-                kst
-                .calculate_indicators(df)
-            )
-
-            return (
-                kst
-                .check_signal(df)
-            )
-
-    except Exception as e:
-        print(
-            f"Strategy error "
-            f"({strategy}): {e}"
-        )
-
-    return None
+portfolio = init_portfolio(SYMBOLS)
 
 
 # =========================
-# MAIN LOOP
+# STRATEGY ROUTER
 # =========================
+
+def get_strategy_signal(df, symbol):
+
+    # simple regime logic (stable version)
+    if df["close"].iloc[-1] > df["close"].rolling(20).mean().iloc[-1]:
+        return trend_signal(df)
+    elif df["close"].pct_change().std() > 0.01:
+        return momentum_signal(df)
+    elif df["close"].pct_change().abs().mean() < 0.002:
+        return mean_reversion_signal(df)
+    else:
+        return breakout_signal(df)
+
+
+# =========================
+# RUN LOOP
+# =========================
+
 def run():
 
-    print(
-        "🚀 EXECUTION ENGINE V3 STARTED"
-    )
-
-    send_telegram(
-        "🚀 EXECUTION ENGINE V3 STARTED"
-    )
+    send_telegram("🚀 FULL EXECUTION ENGINE STARTED")
 
     while True:
 
-        for symbol in PAIRS:
+        for symbol in SYMBOLS:
 
             try:
+                df = get_klines(symbol, INTERVAL, LIMIT)
 
-                df = get_klines(symbol)
+                if df is None or len(df) < 30:
+                    continue
 
-                strategy = (
-                    select_strategy(df)
-                )
+                price = float(df["close"].iloc[-1])
 
-                signal = (
-                    get_signal(
-                        df,
-                        strategy
-                    )
-                )
+                signal = get_strategy_signal(df, symbol)
 
-                price = (
-                    df["close"]
-                    .iloc[-1]
-                )
+                print(f"{symbol} | {signal}")
 
-                print(
-                    f"{symbol} | "
-                    f"{strategy} | "
-                    f"{signal}"
-                )
+                # EXECUTION
+                process_trade(symbol, signal, price, portfolio)
 
-                if signal:
-
-                    process_trade(
-                        symbol,
-                        strategy,
-                        signal,
-                        price
-                    )
+                # OPTIONAL: periodic summary
+                if signal in ["BUY", "SELL"]:
+                    send_telegram(format_summary(portfolio, symbol))
 
             except Exception as e:
+                print(f"Error {symbol}: {e}")
 
-                print(
-                    f"Error {symbol}: {e}"
-                )
-
-        print("Cycle complete...\n")
-
+        print("Cycle complete...")
         time.sleep(SLEEP)
 
 
