@@ -12,11 +12,14 @@ from strategies import (
     kst
 )
 
-# ================= CORE LAYERS =================
+# ================= CORE SYSTEM =================
 from core.accounting import log_trade
-from core.performance import compute_strategy_scores
 from core.strategy_guard import evaluate_strategies, is_disabled
 from core.correlation import register_position, remove_position, is_correlated_block
+
+from core.exits import should_exit
+from core.dashboard import generate_dashboard
+from core.capital_allocator import rebalance_capital, get_allocation, get_allocation_report
 
 # ================= CONFIG =================
 SYMBOLS = [
@@ -30,7 +33,6 @@ LIMIT = 100
 SLEEP = 60
 
 START_BALANCE = 500
-RISK_PER_TRADE = 0.10
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("ALERT_CHAT_ID")
@@ -41,15 +43,13 @@ BASE_URL = "https://api.binance.com/api/v3/klines"
 positions = {}
 entry_price = {}
 position_size = {}
-last_trade_time = {}
-
-COOLDOWN_SECONDS = 120  # anti-overtrading
+entry_time = {}
+last_report = time.time()
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         return
-
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
@@ -66,6 +66,7 @@ def get_klines(symbol):
 
 # ================= REGIME =================
 def select_strategy(df):
+
     ma20 = df["close"].rolling(20).mean()
     slope = ma20.diff().iloc[-1]
     vol = df["close"].rolling(20).std().iloc[-1]
@@ -105,82 +106,73 @@ def get_signal(df, strategy):
 
     return None
 
-# ================= QUALITY FILTER =================
-def is_high_quality(df, strategy):
-
-    vol = df["close"].rolling(20).std().iloc[-1]
-    price = df["close"].iloc[-1]
-    vol_ratio = vol / price
-
-    # avoid dead markets
-    if vol_ratio < 0.002:
-        return False
-
-    # avoid chaos markets
-    if vol_ratio > 0.03:
-        return False
-
-    return True
-
 # ================= EXECUTION =================
 def execute_trade(symbol, signal, price, strategy):
 
+    global positions
+
     now = time.time()
 
-    # cooldown anti-overtrade
-    if symbol in last_trade_time:
-        if now - last_trade_time[symbol] < COOLDOWN_SECONDS:
-            return
-
-    # ENTRY
+    # ================= ENTRY =================
     if signal == "BUY" and positions.get(symbol) is None:
+
+        allocation = get_allocation(strategy)
+        size = START_BALANCE * allocation
 
         positions[symbol] = "LONG"
         entry_price[symbol] = price
-        position_size[symbol] = START_BALANCE * RISK_PER_TRADE
-
-        last_trade_time[symbol] = now
+        position_size[symbol] = size
+        entry_time[symbol] = now
 
         register_position(symbol, strategy)
 
-        msg = f"🟢 BUY {symbol} | {strategy} @ {price}"
+        msg = f"🟢 BUY {symbol} | {strategy} | size=${round(size,2)} @ {price}"
         send_telegram(msg)
 
-    # EXIT
-    elif signal == "SELL" and positions.get(symbol) == "LONG":
+    # ================= EXIT =================
+    elif positions.get(symbol) == "LONG":
 
-        entry = entry_price[symbol]
-        size = position_size[symbol]
-
-        pnl_pct = ((price - entry) / entry) * 100
-        pnl_usd = size * (pnl_pct / 100)
-
-        log_trade(symbol, strategy, "LONG", entry, price, size, pnl_usd)
-
-        remove_position(symbol)
-
-        last_trade_time[symbol] = now
-
-        msg = (
-            f"🔴 SELL {symbol} | {strategy} @ {price}\n"
-            f"PnL: {round(pnl_pct, 2)}% | ${round(pnl_usd, 2)}"
+        exit_reason = should_exit(
+            symbol,
+            entry_price[symbol],
+            price,
+            entry_time[symbol],
+            regime_flip=False
         )
 
-        send_telegram(msg)
+        if signal == "SELL" or exit_reason is not None:
 
-        positions[symbol] = None
-        entry_price[symbol] = 0
-        position_size[symbol] = 0
+            entry = entry_price[symbol]
+            size = position_size[symbol]
+
+            pnl_pct = ((price - entry) / entry) * 100
+            pnl_usd = size * (pnl_pct / 100)
+
+            log_trade(symbol, strategy, "LONG", entry, price, size, pnl_usd)
+            remove_position(symbol)
+
+            positions[symbol] = None
+            entry_price[symbol] = 0
+            position_size[symbol] = 0
+
+            msg = (
+                f"🔴 SELL {symbol} | {strategy}\n"
+                f"PnL: {round(pnl_pct,2)}% | ${round(pnl_usd,2)}\n"
+                f"Exit: {exit_reason if exit_reason else 'signal'}"
+            )
+
+            send_telegram(msg)
 
 # ================= MAIN LOOP =================
 def run():
 
-    print("🚀 HIGH QUALITY TRADING ENGINE STARTED")
-    send_telegram("🚀 HIGH QUALITY TRADING ENGINE STARTED")
+    print("🚀 FULL CAPITAL ALLOCATOR v2 ENGINE STARTED")
+    send_telegram("🚀 FULL CAPITAL ALLOCATOR v2 ENGINE STARTED")
 
     while True:
 
         evaluate_strategies()
+        rebalance_capital()
 
         for symbol in SYMBOLS:
 
@@ -189,24 +181,27 @@ def run():
 
                 strategy = select_strategy(df)
 
-                # SKIP DISABLED STRATEGIES
                 if is_disabled(strategy):
-                    continue
-
-                # QUALITY FILTER (THIS IS YOUR OVERTRADING FIX)
-                if not is_high_quality(df, strategy):
                     continue
 
                 signal = get_signal(df, strategy)
                 price = df["close"].iloc[-1]
-
-                print(f"{symbol} | {strategy} | {signal}")
 
                 if signal:
                     execute_trade(symbol, signal, price, strategy)
 
             except Exception as e:
                 print(f"Error {symbol}: {e}")
+
+        # ================= REPORTS =================
+        global last_report
+
+        if time.time() - last_report > 900:
+
+            send_telegram(generate_dashboard())
+            send_telegram(get_allocation_report())
+
+            last_report = time.time()
 
         print("Cycle complete...\n")
         time.sleep(SLEEP)
