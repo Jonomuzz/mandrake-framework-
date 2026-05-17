@@ -13,12 +13,13 @@ from strategies import (
 
 from core.signal_strength import score_signal
 from core.frequency_controller import FrequencyController
-from core.telegram_commands import process_command, frequency_state
+from core.telegram_commands import frequency_state
 from core.notifications import send_telegram
 from core.config import PAIRS, INTERVAL, LIMIT, SLEEP
 
+
 # =========================
-# INIT
+# INIT ENGINE
 # =========================
 freq_controller = FrequencyController()
 
@@ -26,47 +27,43 @@ BASE_URL = "https://api.binance.com/api/v3/klines"
 
 
 # =========================
-# DATA
+# DATA LOADER (FIXED OHLCV)
 # =========================
 def get_klines(symbol):
-    params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
-    r = requests.get(BASE_URL, params=params)
-    data = r.json()
+    params = {
+        "symbol": symbol,
+        "interval": INTERVAL,
+        "limit": LIMIT
+    }
+
+    response = requests.get(BASE_URL, params=params)
+    data = response.json()
 
     df = pd.DataFrame(data, columns=[
-    "time",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "close_time",
-    "qav",
-    "num_trades",
-    "taker_base_vol",
-    "taker_quote_vol",
-    "ignore"
-])
+        "time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "qav",
+        "num_trades",
+        "taker_base_vol",
+        "taker_quote_vol",
+        "ignore"
+    ])
 
-# =========================
-# TYPE CONVERSION
-# =========================
-numeric_cols = [
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume"
-]
+    numeric_cols = ["open", "high", "low", "close", "volume"]
 
-for col in numeric_cols:
-    df[col] = df[col].astype(float)
+    for col in numeric_cols:
+        df[col] = df[col].astype(float)
 
-return df
+    return df
 
 
 # =========================
-# REGIME DETECTION
+# REGIME DETECTOR
 # =========================
 def select_strategy(df):
     ma20 = df["close"].rolling(20).mean()
@@ -93,21 +90,29 @@ def select_strategy(df):
 # =========================
 def get_signal(df, strategy):
 
-    if strategy == "trend":
-        df = trend_strength_crossover.calculate_indicators(df)
-        return trend_strength_crossover.check_signal(df)
+    try:
+        if strategy == "trend":
+            df = trend_strength_crossover.calculate_indicators(df)
+            return trend_strength_crossover.check_signal(df)
 
-    if strategy == "mean_reversion":
-        df = mean_reversion.calculate_indicators(df)
-        return mean_reversion.check_signal(df)
+        if strategy == "mean_reversion":
+            df = mean_reversion.calculate_indicators(df)
+            return mean_reversion.check_signal(df)
 
-    if strategy == "breakout":
-        df = breakout.calculate_indicators(df)
-        return breakout.check_signal(df)
+        if strategy == "breakout":
+            df = breakout.calculate_indicators(df)
+            return breakout.check_signal(df)
 
-    if strategy == "momentum":
-        df = momentum.calculate_indicators(df)
-        return momentum.check_signal(df)
+        if strategy == "momentum":
+            df = momentum.calculate_indicators(df)
+            return momentum.check_signal(df)
+
+        if strategy == "kst":
+            df = kst.calculate_indicators(df)
+            return kst.check_signal(df)
+
+    except Exception as e:
+        print(f"Strategy error ({strategy}): {e}")
 
     return None
 
@@ -116,16 +121,19 @@ def get_signal(df, strategy):
 # MAIN LOOP
 # =========================
 def run():
-    print("🚀 FULL TRADING BRAIN STARTED")
-    send_telegram("🚀 FULL TRADING BRAIN STARTED")
+    print("🚀 FULL EXECUTION ENGINE STARTED")
+    send_telegram("🚀 FULL EXECUTION ENGINE STARTED")
 
     while True:
+
         for symbol in PAIRS:
+
             try:
                 df = get_klines(symbol)
 
                 strategy = select_strategy(df)
                 signal = get_signal(df, strategy)
+
                 price = df["close"].iloc[-1]
 
                 print(f"{symbol} | {strategy} | {signal}")
@@ -136,15 +144,19 @@ def run():
                 if frequency_state.get("paused"):
                     continue
 
+                # =========================
+                # ONLY TRADE ON SIGNAL
+                # =========================
                 if signal:
+
                     score = score_signal(df, strategy)
 
                     print(f"{symbol} | SCORE {score}")
 
-                    # ONLY HIGH QUALITY TRADES
                     if score >= 70 and freq_controller.can_trade(symbol):
 
                         msg = f"{symbol} | {strategy.upper()} | {signal} @ {price} | SCORE {score}"
+
                         send_telegram(msg)
 
                         freq_controller.mark_trade(symbol)
