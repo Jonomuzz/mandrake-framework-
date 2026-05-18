@@ -30,8 +30,8 @@ def process_trade(symbol, signal, current_price):
     risk_amount = get_risk_amount(symbol, 10)
 
     open_position(
-        symbol=symbol,
-        side=signal,
-        entry_price=current_price,
-        size=risk_amount
-        close_position(symbol)
+    symbol=symbol,
+    side=side,
+    price=price,
+    size=size
+)
