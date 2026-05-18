@@ -1,16 +1,8 @@
 from core.accounting import update_trade, get_risk_amount
 
 
-# =========================
-# SIMPLE POSITION STORE
-# =========================
-
 positions = {}
 
-
-# =========================
-# OPEN / CLOSE LOGIC
-# =========================
 
 def process_trade(symbol, signal, price, balance=500, risk_pct=10):
 
@@ -22,9 +14,7 @@ def process_trade(symbol, signal, price, balance=500, risk_pct=10):
     if symbol not in positions:
         positions[symbol] = None
 
-    # =========================
-    # OPEN POSITION
-    # =========================
+    # OPEN
     if positions[symbol] is None:
 
         positions[symbol] = {
@@ -34,17 +24,12 @@ def process_trade(symbol, signal, price, balance=500, risk_pct=10):
         }
 
         print(f"🟢 OPEN {signal} {symbol} @ {price}")
-
         return
 
-    # =========================
-    # CLOSE CONDITION
-    # =========================
+    # CLOSE
     pos = positions[symbol]
 
     if pos["side"] != signal:
-
-        pnl = 0
 
         if pos["side"] == "BUY":
             pnl = price - pos["entry"]
@@ -60,15 +45,7 @@ def process_trade(symbol, signal, price, balance=500, risk_pct=10):
         positions[symbol] = None
 
 
-# =========================
-# POSITION CHECK (SAFE HOOK)
-# =========================
-
 def check_positions(symbol, price):
-    """
-    Can be extended later for SL/TP/trailing stops
-    Currently just keeps structure stable
-    """
 
     if symbol not in positions:
         positions[symbol] = None
