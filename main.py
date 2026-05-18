@@ -1,145 +1,73 @@
 import time
-import traceback
-
 from core.data import get_klines
-from core.notifications import send_telegram
-from core.execution import process_trade, check_positions
-from core.accounting import build_summary
 
 from strategies.trend import get_signal as trend_signal
-from strategies.mean_reversion import get_signal as mean_reversion_signal
-from strategies.momentum import get_signal as momentum_signal
+from strategies.mean_reversion import get_signal as mr_signal
 from strategies.breakout import get_signal as breakout_signal
+from strategies.momentum import get_signal as momentum_signal
 
+from core.execution_engine_v3 import process_trade, tick_cooldowns
 
-# =========================
-# CONFIG
-# =========================
 
 SYMBOLS = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "BNBUSDT",
-    "SOLUSDT",
-    "XRPUSDT",
-    "ADAUSDT",
-    "DOGEUSDT",
-    "AVAXUSDT",
-    "LINKUSDT",
-    "MATICUSDT",
-    "LTCUSDT",
-    "ATOMUSDT"
+    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT",
+    "XRPUSDT","ADAUSDT","DOGEUSDT","AVAXUSDT",
+    "LINKUSDT","MATICUSDT","LTCUSDT","ATOMUSDT"
 ]
 
 INTERVAL = "1m"
 LIMIT = 100
-SLEEP_SECONDS = 30
 
-# prevents duplicate spam signals
-last_signals = {}
-
-
-# =========================
-# STRATEGY ROUTER
-# =========================
-
-def select_strategy(symbol):
-    if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
-        return "trend"
-
-    if symbol in ["SOLUSDT", "AVAXUSDT", "LINKUSDT"]:
-        return "momentum"
-
-    if symbol in ["XRPUSDT", "ADAUSDT", "DOGEUSDT"]:
-        return "breakout"
-
-    return "mean_reversion"
+BALANCE = 500
+RISK_PCT = 10
 
 
-def get_signal(strategy, df):
-    if strategy == "trend":
-        return trend_signal(df)
+def select_strategy(df):
 
-    if strategy == "momentum":
-        return momentum_signal(df)
+    # simple router (you can upgrade later)
+    return {
+        "trend": trend_signal,
+        "mean_reversion": mr_signal,
+        "breakout": breakout_signal,
+        "momentum": momentum_signal
+    }
 
-    if strategy == "breakout":
-        return breakout_signal(df)
-
-    return mean_reversion_signal(df)
-
-
-# =========================
-# MAIN ENGINE
-# =========================
 
 def run():
 
-    print("🚀 FULL POSITION EXECUTION ENGINE STARTED")
-    send_telegram("🚀 FULL POSITION EXECUTION ENGINE STARTED")
-
-    cycle = 0
+    print("🚀 FULL V3 EXECUTION ENGINE STARTED")
 
     while True:
 
         for symbol in SYMBOLS:
 
             try:
-
-                # =========================
-                # DATA
-                # =========================
                 df = get_klines(symbol, INTERVAL, LIMIT)
-                current_price = float(df.iloc[-1]["close"])
 
-                # =========================
-                # STRATEGY
-                # =========================
-                strategy = select_strategy(symbol)
-                signal = get_signal(strategy, df)
+                strategies = select_strategy(df)
 
-                print(f"{symbol} | {strategy} | {signal}")
+                for name, strat in strategies.items():
 
-                # =========================
-                # POSITION MANAGEMENT
-                # =========================
-                check_positions(symbol, current_price)
+                    signal = strat(df)
 
-                # =========================
-                # DUPLICATE FILTER
-                # =========================
-                if signal == last_signals.get(symbol):
-                    continue
+                    if signal:
+                        price = df.iloc[-1]["close"]
 
-                last_signals[symbol] = signal
+                        process_trade(
+                            symbol=symbol,
+                            signal=signal,
+                            price=price,
+                            balance=BALANCE,
+                            risk_pct=RISK_PCT
+                        )
 
-                # =========================
-                # EXECUTION
-                # =========================
-                if signal:
-                    process_trade(symbol, signal, current_price)
+            except Exception as e:
+                print(f"Error {symbol}: {e}")
 
-            except Exception:
-                print(f"\n❌ ERROR IN {symbol}")
-                print(traceback.format_exc())
+        tick_cooldowns()
+        print("Cycle complete...")
+        time.sleep(60)
 
-        cycle += 1
-
-        # =========================
-        # SUMMARY REPORT
-        # =========================
-        if cycle % 20 == 0:
-            summary = build_summary()
-            print(summary)
-            send_telegram(summary)
-
-        print("Cycle complete...\n")
-        time.sleep(SLEEP_SECONDS)
-
-
-# =========================
-# ENTRY POINT (IMPORTANT)
-# =========================
 
 if __name__ == "__main__":
     run()
