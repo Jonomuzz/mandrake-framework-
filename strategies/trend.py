@@ -35,9 +35,6 @@ def check_signal(df):
 
 
 def get_signal(df):
-    """
-    Standardized execution engine interface
-    """
 
     df = calculate_indicators(df)
 
