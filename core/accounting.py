@@ -5,7 +5,7 @@ DATA_FILE = "storage/metrics.json"
 
 
 # =========================
-# LOAD / SAVE SAFE STATE
+# STATE
 # =========================
 
 def load_state():
@@ -24,7 +24,21 @@ def save_state(state):
 
 
 # =========================
-# UPDATE TRADE RESULTS
+# RISK ENGINE (MUST EXIST)
+# =========================
+
+def get_risk_amount(balance, risk_percent=10):
+    """
+    Position sizing engine
+    """
+    try:
+        return round(float(balance) * float(risk_percent) / 100.0, 2)
+    except:
+        return 0.0
+
+
+# =========================
+# TRADE TRACKING
 # =========================
 
 def update_trade(symbol, pnl, win):
@@ -51,7 +65,7 @@ def update_trade(symbol, pnl, win):
 
 
 # =========================
-# BUILD SUMMARY REPORT
+# SUMMARY
 # =========================
 
 def build_summary():
@@ -59,17 +73,16 @@ def build_summary():
     state = load_state()
 
     lines = []
+
     total_trades = 0
     total_pnl = 0.0
     total_wins = 0
-    total_losses = 0
 
     for symbol, data in state.items():
 
-        trades = data.get("trades", 0)
-        wins = data.get("wins", 0)
-        losses = data.get("losses", 0)
-        pnl = data.get("pnl", 0.0)
+        trades = data["trades"]
+        wins = data["wins"]
+        pnl = data["pnl"]
 
         if trades == 0:
             continue
@@ -83,7 +96,6 @@ def build_summary():
         total_trades += trades
         total_pnl += pnl
         total_wins += wins
-        total_losses += losses
 
     if total_trades == 0:
         return "No trades yet."
