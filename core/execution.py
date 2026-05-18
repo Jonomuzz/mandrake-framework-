@@ -1,111 +1,76 @@
-import json
-import os
-
-DATA_FILE = "storage/metrics.json"
+from core.accounting import update_trade, get_risk_amount
 
 
 # =========================
-# LOAD / SAVE
+# SIMPLE POSITION STORE
 # =========================
 
-def load_state():
-    if not os.path.exists(DATA_FILE):
-        return {}
-
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
-
-
-def save_state(state):
-    os.makedirs("storage", exist_ok=True)
-
-    with open(DATA_FILE, "w") as f:
-        json.dump(state, f, indent=4)
+positions = {}
 
 
 # =========================
-# RISK ENGINE (FIXED MISSING IMPORT)
+# OPEN / CLOSE LOGIC
 # =========================
 
-def get_risk_amount(balance, risk_percent=10):
-    """
-    Calculates position size based on account balance
-    """
-    try:
-        risk = float(balance) * (float(risk_percent) / 100.0)
-        return round(risk, 2)
-    except:
-        return 0.0
+def process_trade(symbol, signal, price, balance=500, risk_pct=10):
 
+    if signal is None:
+        return
 
-# =========================
-# UPDATE TRADE RESULTS
-# =========================
+    risk_amount = get_risk_amount(balance, risk_pct)
 
-def update_trade(symbol, pnl, win):
+    if symbol not in positions:
+        positions[symbol] = None
 
-    state = load_state()
+    # =========================
+    # OPEN POSITION
+    # =========================
+    if positions[symbol] is None:
 
-    if symbol not in state:
-        state[symbol] = {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "pnl": 0.0
+        positions[symbol] = {
+            "side": signal,
+            "entry": price,
+            "size": risk_amount
         }
 
-    state[symbol]["trades"] += 1
-    state[symbol]["pnl"] += pnl
+        print(f"🟢 OPEN {signal} {symbol} @ {price}")
 
-    if win:
-        state[symbol]["wins"] += 1
-    else:
-        state[symbol]["losses"] += 1
+        return
 
-    save_state(state)
+    # =========================
+    # CLOSE CONDITION
+    # =========================
+    pos = positions[symbol]
+
+    if pos["side"] != signal:
+
+        pnl = 0
+
+        if pos["side"] == "BUY":
+            pnl = price - pos["entry"]
+        else:
+            pnl = pos["entry"] - price
+
+        win = pnl > 0
+
+        update_trade(symbol, pnl, win)
+
+        print(f"🔴 CLOSE {symbol} | PnL: {pnl:.2f}")
+
+        positions[symbol] = None
 
 
 # =========================
-# SUMMARY REPORT
+# POSITION CHECK (SAFE HOOK)
 # =========================
 
-def build_summary():
+def check_positions(symbol, price):
+    """
+    Can be extended later for SL/TP/trailing stops
+    Currently just keeps structure stable
+    """
 
-    state = load_state()
+    if symbol not in positions:
+        positions[symbol] = None
 
-    lines = []
-
-    total_trades = 0
-    total_pnl = 0.0
-    total_wins = 0
-
-    for symbol, data in state.items():
-
-        trades = data.get("trades", 0)
-        wins = data.get("wins", 0)
-        pnl = data.get("pnl", 0.0)
-
-        if trades == 0:
-            continue
-
-        win_rate = (wins / trades) * 100
-
-        lines.append(
-            f"{symbol} | Trades: {trades} | Win Rate: {win_rate:.1f}% | PnL: {pnl:.2f}"
-        )
-
-        total_trades += trades
-        total_pnl += pnl
-        total_wins += wins
-
-    if total_trades == 0:
-        return "No trades yet."
-
-    total_win_rate = (total_wins / total_trades) * 100
-
-    lines.append("")
-    lines.append(
-        f"TOTAL | Trades: {total_trades} | Win Rate: {total_win_rate:.1f}% | PnL: {total_pnl:.2f}"
-    )
-
-    return "\n".join(lines)
+    return positions[symbol]
