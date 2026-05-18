@@ -1,21 +1,22 @@
 import pandas as pd
 
-
 def calculate_indicators(df):
-    """
-    Fast trend strategy indicators
-    """
+    df = df.copy()
 
-    df["ma5"] = df["close"].rolling(window=5).mean()
-    df["ma20"] = df["close"].rolling(window=20).mean()
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+
+    df["ma5"] = df["close"].rolling(5).mean()
+    df["ma20"] = df["close"].rolling(20).mean()
 
     return df
 
 
 def check_signal(df):
-    """
-    Fast MA crossover logic
-    """
+
+    if df is None or len(df) < 25:
+        return None
+
+    df = df.dropna()
 
     if len(df) < 25:
         return None
@@ -23,11 +24,14 @@ def check_signal(df):
     prev = df.iloc[-2]
     curr = df.iloc[-1]
 
-    # BUY crossover
+    if pd.isna(prev["ma5"]) or pd.isna(prev["ma20"]):
+        return None
+
+    # BUY
     if prev["ma5"] < prev["ma20"] and curr["ma5"] > curr["ma20"]:
         return "BUY"
 
-    # SELL crossover
+    # SELL
     if prev["ma5"] > prev["ma20"] and curr["ma5"] < curr["ma20"]:
         return "SELL"
 
@@ -35,9 +39,5 @@ def check_signal(df):
 
 
 def get_signal(df):
-
     df = calculate_indicators(df)
-
-    signal = check_signal(df)
-
-    return signal
+    return check_signal(df)
