@@ -1,82 +1,37 @@
-import time
+from core.position_manager import (
+    has_position,
+    open_position,
+    close_position,
+    get_position
+)
+
+from core.accounting import (
+    get_risk_amount,
+    record_trade
+)
+
 from core.notifications import send_telegram
-from core.portfolio import update_portfolio
-
-# =========================
-# EXECUTION ENGINE V3
-# =========================
-
-OPEN_POSITIONS = {}  # in-memory position tracking
 
 
-def open_position(symbol, side, price, portfolio):
-    """
-    Opens a simulated position
-    """
-
-    if symbol in OPEN_POSITIONS:
-        return None  # already in trade
-
-    position = {
-        "symbol": symbol,
-        "side": side,
-        "entry": price,
-        "time": time.time()
-    }
-
-    OPEN_POSITIONS[symbol] = position
-
-    send_telegram(f"🟢 OPEN {side} {symbol} @ {price}")
-    return position
+TP_PERCENT = 0.015
+SL_PERCENT = 0.01
 
 
-def close_position(symbol, price, portfolio):
-    """
-    Closes position and calculates PnL
-    """
 
-    if symbol not in OPEN_POSITIONS:
-        return None
+def process_trade(symbol, signal, current_price):
 
-    position = OPEN_POSITIONS.pop(symbol)
-
-    entry = position["entry"]
-
-    # PnL %
-    if position["side"] == "BUY":
-        pnl_pct = ((price - entry) / entry) * 100
-    else:
-        pnl_pct = ((entry - price) / entry) * 100
-
-    update_portfolio(portfolio, symbol, pnl_pct)
-
-    send_telegram(
-        f"🔴 CLOSE {symbol}\n"
-        f"Entry: {entry}\n"
-        f"Exit: {price}\n"
-        f"PnL: {round(pnl_pct, 2)}%"
-    )
-
-    return pnl_pct
-
-
-def process_trade(symbol, signal, price, portfolio):
-    """
-    Main execution handler
-    """
-
-    # NO SIGNAL
     if signal is None:
         return
 
-    # OPEN LONG
-    if signal == "BUY":
-        return open_position(symbol, "BUY", price, portfolio)
+    # BLOCK DUPLICATES
+    if has_position(symbol):
+        return
 
-    # OPEN SHORT / EXIT LONG
-    if signal == "SELL":
-        # if position exists → close
-        if symbol in OPEN_POSITIONS:
-            return close_position(symbol, price, portfolio)
+    risk_amount = get_risk_amount(symbol, 10)
 
-    return None
+    open_position(
+        symbol=symbol,
+        side=signal,
+        entry_price=current_price,
+        size=risk_amount
+        close_position(symbol)
