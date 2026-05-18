@@ -5,19 +5,19 @@ def has_position(symbol):
     return symbol in positions
 
 
-def open_position(symbol, side, price, strategy):
-
+def open_position(symbol, side, entry_price, size):
     positions[symbol] = {
         "side": side,
-        "entry_price": price,
-        "strategy": strategy
+        "entry": entry_price,
+        "size": size
     }
 
 
-def close_position(symbol):
 
+def close_position(symbol):
     if symbol in positions:
         del positions[symbol]
+
 
 
 def get_position(symbol):
